@@ -1,0 +1,23 @@
+# Python / Backend
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+backend/weights/*.h5
+backend/weights/*.pth
+backend/model_config.json
+backend/inspect_h5.py
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.env.local
+frontend/.env
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+*.log

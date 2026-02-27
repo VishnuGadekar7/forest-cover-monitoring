@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+:root {
+  --bg-primary: #0a0f1a;
+  --bg-card: #111827;
+  --bg-card-hover: #1a2235;
+  --border-subtle: #1f2d45;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-blue: #3b82f6;
+  --text-muted: #64748b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--bg-primary);
+  min-height: 100vh;
+}
+
+/* ── Glassmorphism card ─────────────────────────────────────── */
+.glass-card {
+  background: rgba(17, 24, 39, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(31, 45, 69, 0.7);
+  border-radius: 1rem;
+}
+
+/* ── Gradient text ──────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #22c55e 0%, #3b82f6 50%, #8b5cf6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Animated border ────────────────────────────────────────── */
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.3),
+              0 0 20px rgba(34, 197, 94, 0.05);
+  transition: box-shadow 0.3s ease;
+}
+.glow-border:hover {
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.6),
+              0 0 30px rgba(34, 197, 94, 0.15);
+}
+
+/* ── Drop zone ──────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.03);
+  transition: all 0.25s ease;
+}
+.drop-zone:hover,
+.drop-zone.drag-over {
+  border-color: rgba(59, 130, 246, 0.8);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+/* ── Stat card ──────────────────────────────────────────────── */
+.stat-card {
+  background: linear-gradient(135deg, #111827 0%, #1a2235 100%);
+  border: 1px solid rgba(31, 45, 69, 0.9);
+  border-radius: 1rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #0a0f1a; }
+::-webkit-scrollbar-thumb { background: #1f2d45; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #2d4060; }
+
+/* ── Spin animation ─────────────────────────────────────────── */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin-slow { animation: spin-slow 2s linear infinite; }
+
+/* ── Pulse glow ─────────────────────────────────────────────── */
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+.pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
+
+/* ── Fade-in slide-up ───────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in-up { animation: fadeInUp 0.5s ease forwards; }
+
+/* ── Leaflet overrides ──────────────────────────────────────── */
+.leaflet-container {
+  background: #0a0f1a !important;
+  border-radius: 0.75rem;
+  z-index: 0;
+}
