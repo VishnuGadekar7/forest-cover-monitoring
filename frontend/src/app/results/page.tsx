@@ -111,7 +111,37 @@ export default function ResultsPage() {
           />
         </div>
 
-        {/* ── Image row: T1 | Change Map | T2 ─────────────────────────────── */}
+        {/* ── Image Row: Original Sources ────────────────────────────────────────── */}
+        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4 fade-in-up">
+          Source Imagery
+        </h2>
+        <div className="grid md:grid-cols-2 gap-4 mb-8">
+          {[
+            { url: result.image_t1_url, label: "Original Satellite — T₁", badge: "Source T₁" },
+            { url: result.image_t2_url, label: "Original Satellite — T₂", badge: "Source T₂" },
+          ].map(({ url, label, badge }) => (
+            <div key={badge} className="glass-card overflow-hidden fade-in-up">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+                <span className="text-xs font-medium text-slate-400">{label}</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-500 font-mono">{badge}</span>
+              </div>
+              <img
+                src={assetUrl(url)}
+                alt={label}
+                className="w-full object-contain bg-black/20"
+                style={{ aspectRatio: "1/1", width: "100%" }}
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='80'%3E%3Crect fill='%23111827' width='100' height='80'/%3E%3Ctext fill='%23334155' font-size='11' x='50' y='45' text-anchor='middle'%3EImage unavailable%3C/text%3E%3C/svg%3E";
+                }}
+              />
+            </div>
+          ))}
+        </div>
+
+        {/* ── Image Row: T1 | Change Map | T2 ─────────────────────────────── */}
+        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4 fade-in-up">
+          Analysis Layers
+        </h2>
         <div className="grid md:grid-cols-3 gap-4 mb-8">
           {[
             { url: result.mask_t1_url, label: "Predicted Mask — T₁", badge: "T₁" },
@@ -126,8 +156,8 @@ export default function ResultsPage() {
               <img
                 src={assetUrl(url)}
                 alt={label}
-                className="w-full object-cover"
-                style={{ minHeight: 180, maxHeight: 240 }}
+                className="w-full object-contain bg-black/20"
+                style={{ aspectRatio: "1/1", width: "100%" }}
                 onError={(e) => {
                   (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='80'%3E%3Crect fill='%23111827' width='100' height='80'/%3E%3Ctext fill='%23334155' font-size='11' x='50' y='45' text-anchor='middle'%3EImage unavailable%3C/text%3E%3C/svg%3E";
                 }}

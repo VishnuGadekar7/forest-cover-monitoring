@@ -1,12 +1,13 @@
 # Python / Backend
+**/__pycache__/
+**/*.pyc
 backend/.venv/
-backend/__pycache__/
-backend/*.pyc
 backend/.env
 backend/weights/*.h5
 backend/weights/*.pth
 backend/model_config.json
 backend/inspect_h5.py
+backend/diag_*.png
 
 # Node / Frontend
 frontend/node_modules/
@@ -21,3 +22,6 @@ frontend/.env
 .vscode/
 .idea/
 *.log
+
+# Generated Assets
+backend/static/

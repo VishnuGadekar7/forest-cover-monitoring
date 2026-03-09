@@ -14,6 +14,7 @@ Design:
 import numpy as np
 import torch
 from PIL import Image
+from typing import Union
 
 from app.services.model_loader import ModelLoader
 from app.utils.image_preprocessing import preprocess, postprocess_mask
@@ -21,45 +22,52 @@ from app.utils.image_preprocessing import preprocess, postprocess_mask
 
 class InferenceService:
     """
-    Runs semantic segmentation inference using the singleton model.
-
-    Usage:
-        service = InferenceService()
-        mask = service.predict(pil_image)   # numpy array (H, W), values {0,1}
+    Runs semantic segmentation inference using one of the available models.
     """
 
-    def __init__(self, threshold: float = 0.5):
+    def __init__(self, model_name: str = "attention_unet", threshold: float = 0.5):
         """
         Args:
-            threshold: Sigmoid output threshold for classifying a pixel as
-                       forest (default 0.5 — can be tuned per dataset).
+            model_name: Name of the model to use (attention_unet, resnet_unet, transnet).
+            threshold: Sigmoid output threshold for forest classification.
         """
         self.threshold = threshold
-        loader = ModelLoader.get_instance()
+        loader = ModelLoader.get_model(model_name)
         self.model = loader.model
         self.device = loader.device
-        self.is_keras = getattr(loader, "is_keras", False)
+        self.is_keras = loader.is_keras
 
-    def predict(self, image: Image.Image) -> np.ndarray:
+    def predict(self, image_data: Union[Image.Image, np.ndarray]) -> np.ndarray:
         """
-        Run segmentation inference on a single PIL image.
+        Run segmentation inference. Accepts PIL Image (RGB) or Numpy Array (H, W, C).
         Automatically routes to PyTorch or Keras depending on the model.
         """
+        if isinstance(image_data, Image.Image):
+            image_data = np.array(image_data)
+            
         if self.is_keras:
-            return self._predict_keras(image)
-        return self._predict_pytorch(image)
+            return self._predict_keras(image_data)
+        return self._predict_pytorch(image_data)
 
-    def _predict_keras(self, image: Image.Image) -> np.ndarray:
-        """Keras (.h5) inference pipeline."""
-        original_size = image.size
-        # Resize to 512x512
-        img_resized = image.resize((512, 512), Image.BILINEAR)
-        # Normalize to [0, 1] — common for Keras segmentation models
-        arr = np.array(img_resized, dtype=np.float32) / 255.0
-        arr = np.expand_dims(arr, axis=0)  # (1, 512, 512, 3)
+    def _predict_keras(self, arr: np.ndarray) -> np.ndarray:
+        """Keras (.h5) inference pipeline for 4-channel models."""
+        h, w = arr.shape[:2]
+        original_size = (w, h)
+        
+        # Preprocess: resize + normalize (0-1) + pad to 4 channels
+        img = Image.fromarray(arr)
+        img_resized = img.resize((512, 512), Image.BILINEAR)
+        arr_proc = np.array(img_resized, dtype=np.float32) / 255.0
+        
+        # Consistent padding: ensure 4 channels (RGB + NIR)
+        if arr_proc.shape[-1] == 3:
+            padding = np.zeros((512, 512, 1), dtype=np.float32)
+            arr_proc = np.concatenate([arr_proc, padding], axis=-1)
+            
+        arr_proc = np.expand_dims(arr_proc, axis=0)  # (1, 512, 512, 4)
 
         # Forward pass
-        probs = self.model.predict(arr, verbose=0)
+        probs = self.model.predict(arr_proc, verbose=0)
         probs = np.squeeze(probs)  # Extract (512, 512)
 
         # Thresholding
@@ -71,10 +79,10 @@ class InferenceService:
         return np.array(mask_img, dtype=np.uint8)
 
     @torch.no_grad()
-    def _predict_pytorch(self, image: Image.Image) -> np.ndarray:
+    def _predict_pytorch(self, image_data: np.ndarray) -> np.ndarray:
         """PyTorch (.pth) inference pipeline."""
-        # Step 1 — Preprocess: resize, normalise, add batch dim
-        tensor, original_size = preprocess(image)
+        # Step 1 — Preprocess: resize, normalise, add batch dim, pad to 4
+        tensor, original_size = preprocess(image_data)
         tensor = tensor.to(self.device)
 
         # Step 2 — Forward pass (no gradient computation)

@@ -20,11 +20,11 @@ from app.services.model_loader import ModelLoader
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load the segmentation model once at startup (singleton)."""
-    print("🌲 Forest Monitor — loading AI model...")
+    print("Forest Monitor -- loading AI model...")
     ModelLoader.get_instance()          # warms the singleton
-    print("✅ Model ready — accepting requests.")
+    print("Model ready -- accepting requests.")
     yield
-    print("🛑 Shutting down Forest Monitor.")
+    print("Shutting down Forest Monitor.")
 
 
 # ── Application factory ───────────────────────────────────────────────────────

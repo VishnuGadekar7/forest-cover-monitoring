@@ -84,14 +84,14 @@ class AttentionUNet(nn.Module):
     Attention U-Net for binary forest segmentation.
 
     Args:
-        in_channels:  Number of input image channels (3 for RGB).
+        in_channels:  Number of input image channels (4 for RGB + NIR).
         out_channels: Number of output channels (1 for binary mask).
         features:     Channel sizes at each encoder level.
     """
 
     def __init__(
         self,
-        in_channels: int = 3,
+        in_channels: int = 4,
         out_channels: int = 1,
         features: list[int] = [64, 128, 256, 512],
     ):
@@ -150,6 +150,6 @@ class AttentionUNet(nn.Module):
         return self.final(x)
 
 
-def build_model(in_channels: int = 3, out_channels: int = 1) -> AttentionUNet:
+def build_model(in_channels: int = 4, out_channels: int = 1) -> AttentionUNet:
     """Factory function — returns an Attention U-Net instance."""
     return AttentionUNet(in_channels=in_channels, out_channels=out_channels)

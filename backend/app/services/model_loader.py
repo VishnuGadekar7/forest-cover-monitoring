@@ -63,10 +63,10 @@ def _load_weights(model: nn.Module, weights_path: Optional[Path], device: torch.
         if "model_state_dict" in state_dict:
             state_dict = state_dict["model_state_dict"]
         model.load_state_dict(state_dict, strict=True)
-        logger.info(f"✅ Loaded weights from {weights_path}")
+        logger.info(f"Loaded weights from {weights_path}")
     else:
         logger.warning(
-            "⚠️  No weight file found — running with random initialisation. "
+            "No weight file found -- running with random initialisation. "
             "Place your .pth or .h5 file in backend/weights/ to enable real inference."
         )
     return model
@@ -74,72 +74,94 @@ def _load_weights(model: nn.Module, weights_path: Optional[Path], device: torch.
 
 class ModelLoader:
     """
-    Singleton that owns the loaded inference model.
-
-    Usage:
-        loader = ModelLoader.get_instance()
-        model  = loader.model
+    Manages loading and caching of different segmentation models.
+    Supports Attention U-Net, ResNet U-Net, and TransNet.
     """
-    _instance: Optional["ModelLoader"] = None
+    _instances: dict[str, "ModelLoader"] = {}
 
-    def __init__(self):
-        model_name  = os.getenv("MODEL_NAME", "attention_unet")
+    def __init__(self, model_name: str):
+        self.model_name = model_name
         device_pref = os.getenv("DEVICE", "auto")
-        weights_env = os.getenv("MODEL_WEIGHTS", "")
-
-        # Resolve weights path: env var takes priority, else look in weights/
-        if weights_env:
-            weights_path = Path(weights_env)
-        else:
-            # Try conventional names including .h5
-            candidates = [
-                WEIGHTS_DIR / f"{model_name}.pth",
-                WEIGHTS_DIR / f"{model_name}.h5",
-                WEIGHTS_DIR / "attention_unet_forest_trained_final.h5",
-                WEIGHTS_DIR / "model.pth",
-                WEIGHTS_DIR / "model.h5",
-            ]
-            weights_path = next((p for p in candidates if p.exists()), None)
+        
+        # Determine weight file
+        weights_dir = Path(__file__).resolve().parents[2] / "weights"
+        
+        # Map of model names to expected weight filenames
+        weight_map = {
+            "attention_unet": "attention_unet_best.h5",
+            "resnet_unet": "resnet_unet.pth",
+            "transnet": "transnet.pth"
+        }
+        
+        specific_weight = weight_map.get(model_name)
+        weights_path = weights_dir / specific_weight if specific_weight else None
+        
+        # Fallback logic: If weights don't exist, log warning
+        if weights_path and not weights_path.exists():
+            logger.warning(f"Weights for {model_name} not found at {weights_path}. Inference will be untrained.")
+            weights_path = None
 
         self.is_keras = False
         
-        # Bypass PyTorch if it's a Keras/TensorFlow model
+        # Handle Keras/TensorFlow (.h5) models
         if weights_path and weights_path.suffix in [".h5", ".keras"]:
             import tensorflow as tf
-            logger.info(f"✅ Loading Keras model from {weights_path}")
-            
-            # The model architecture saved in the older Keras .h5 causes ValueError 
-            # and AttributeError during deserialization in TF >= 2.13.
-            # Instead of loading the corrupted architecture JSON, we build it
-            # fresh and just load the raw layer weights.
+            import tensorflow.keras.backend as K
             from app.models.keras_unet import build_keras_unet
+
+            # Custom loss functions matching Colab training setup
+            def dice_coef(y_true, y_pred, smooth=1):
+                intersection = K.sum(y_true * y_pred)
+                return (2. * intersection + smooth) / (K.sum(y_true) + K.sum(y_pred) + smooth)
+
+            def bce_dice_loss(y_true, y_pred):
+                bce = tf.keras.losses.binary_crossentropy(y_true, y_pred)
+                dice = 1 - dice_coef(y_true, y_pred)
+                return bce + dice
+
             try:
-                logger.info("🛠️  Building fresh Keras U-Net architecture...")
+                logger.info(f"Building Keras model for {model_name}...")
                 self.model = build_keras_unet()
-                
-                logger.info(f"📥 Loading weights from {weights_path}...")
-                # load_weights by_name=True precisely maps parameters to their named components
-                self.model.load_weights(str(weights_path), by_name=True)
-                logger.info("✅ Successfully injected weights into Keras model.")
-                
+
+                # Compile with same loss/metrics used in Colab training
+                self.model.compile(
+                    optimizer=tf.keras.optimizers.Adam(1e-4),
+                    loss=bce_dice_loss,
+                    metrics=["accuracy", dice_coef]
+                )
+
+                logger.info(f"Loading weights from {weights_path}...")
+                self.model.load_weights(str(weights_path))
+                self.is_keras = True
+                self.device = "tf-auto"
+                return
             except Exception as e:
-                logger.error(f"❌ Failed to load Keras weights: {e}")
+                logger.error(f"Failed to load Keras weights: {e}")
                 raise e
-                
-            self.is_keras = True
-            self.device = "tf-auto"
-            return
 
+        # Handle PyTorch (.pth) models
         self.device = _resolve_device(device_pref)
-        logger.info(f"🖥️  Inference device: {self.device}")
-
+        logger.info(f"Loading PyTorch model {model_name} on {self.device}...")
+        
         self.model = _import_and_build(model_name, self.device)
         self.model.eval()
 
-        _load_weights(self.model, weights_path, self.device)
+        if weights_path:
+            _load_weights(self.model, weights_path, self.device)
+        else:
+            logger.warning(f"Starting {model_name} with random weights.")
+
+    @classmethod
+    def get_model(cls, model_name: str = None) -> "ModelLoader":
+        """Get or create a model instance by name. Defaults to attention_unet."""
+        if model_name is None:
+            model_name = os.getenv("MODEL_NAME", "attention_unet")
+            
+        if model_name not in cls._instances:
+            cls._instances[model_name] = cls(model_name)
+        return cls._instances[model_name]
 
     @classmethod
     def get_instance(cls) -> "ModelLoader":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+        """Legacy support for singleton access."""
+        return cls.get_model()

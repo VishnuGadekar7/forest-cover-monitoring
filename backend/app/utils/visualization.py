@@ -18,13 +18,25 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Image Saving ──────────────────────────────────────────────────────────────
 
-def save_image(img: Image.Image, suffix: str) -> tuple[str, str]:
+def save_image(img, suffix: str) -> tuple[str, str]:
     """
-    Save a PIL image to the static/change_maps directory.
+    Save a PIL image (or numpy array) to the static/change_maps directory.
+
+    Accepts either a PIL.Image.Image or a numpy ndarray (H, W, C).
+    4-channel arrays (RGBA / RGB+NIR) are converted to RGB before saving.
 
     Returns:
         (filename, relative_url) — e.g. ("abc123_change.png", "/static/change_maps/abc123_change.png")
     """
+    # Coerce numpy arrays to PIL
+    if isinstance(img, np.ndarray):
+        if img.ndim == 3 and img.shape[2] == 4:
+            img = Image.fromarray(img[:, :, :3])   # drop 4th channel (NIR)
+        else:
+            img = Image.fromarray(img)
+    # Ensure RGB mode (no alpha) for clean PNG output
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
     base_id = uuid.uuid4().hex[:12]
     filename = f"{base_id}_{suffix}.png"
     path = STATIC_DIR / filename

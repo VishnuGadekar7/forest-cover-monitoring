@@ -58,20 +58,24 @@ def validate_image_bytes(data: bytes, filename: str) -> None:
             raise ValueError(f"Cannot open image '{filename}': {exc}") from exc
 
 
-def load_image(data: bytes) -> Image.Image:
-    """Load raw bytes → PIL Image in RGB mode. Fallback to tifffile for EO formats."""
+def load_image(data: bytes) -> np.ndarray:
+    """Load raw bytes → Numpy Array (H, W, C). Supports RGB and multi-band TIFFs."""
     try:
+        # Standard PIL loading
         img = Image.open(io.BytesIO(data))
-        return img.convert("RGB")
+        # Support RGB (3) and RGBA or similar 4-band modes
+        arr = np.array(img)
+        if arr.ndim == 3 and arr.shape[-1] in [3, 4]:
+            return arr
+        return np.array(img.convert("RGB"))
     except Exception:
         try:
             import tifffile
-            import numpy as np
             arr = tifffile.imread(io.BytesIO(data))
             
             # Normalize common Earth Observation bit depths to uint8
             if arr.dtype == np.uint16:
-                arr = (arr / 256.0).astype(np.uint8)
+                arr = (np.clip(arr / 4000.0, 0, 1) * 255.0).astype(np.uint8)
             elif arr.dtype in [np.float32, np.float64]:
                 if arr.max() <= 1.0:
                     arr = (arr * 255.0).astype(np.uint8)
@@ -82,32 +86,45 @@ def load_image(data: bytes) -> Image.Image:
             # Standardize channels directly
             if arr.ndim == 2:
                 arr = np.stack([arr]*3, axis=-1)
-            elif arr.ndim == 3 and arr.shape[0] in [3, 4, 12, 13]: # Landsat/Sentinel bands first
+            elif arr.ndim == 3 and arr.shape[0] in [3, 4, 12, 13]: # Bands first
                 arr = np.transpose(arr, (1, 2, 0))
                 
-            if arr.ndim == 3 and arr.shape[-1] >= 3:
-                arr = arr[:, :, :3] # Take only RGB
+            if arr.ndim == 3 and arr.shape[-1] > 4:
+                arr = arr[:, :, :4] # Take at most 4 bands (RGB + NIR)
             
-            # Handle single channel 3D gracefully
-            if arr.ndim == 3 and arr.shape[-1] == 1:
-                 arr = np.concatenate([arr]*3, axis=-1)
-                 
-            return Image.fromarray(arr).convert("RGB")
+            return arr
         except Exception as e2:
-            raise ValueError(f"Image could not be parsed as standard format or TIFF: {e2}")
+            raise ValueError(f"Image could not be parsed: {e2}")
 
 
-def preprocess(image: Image.Image) -> Tuple[torch.Tensor, Tuple[int, int]]:
+def preprocess(image_data: np.ndarray) -> Tuple[torch.Tensor, Tuple[int, int]]:
     """
-    Resize + normalise a PIL Image into a model-ready float32 tensor.
+    Resize + normalise a numpy array (H, W, C) into a model-ready float32 tensor.
+    If 3 channels are provided, it pads with a 4th zero channel to match the model.
 
     Returns:
-        tensor        : shape (1, 3, 512, 512) — batch dimension prepended
-        original_size : (width, height) of original image before resize
+        tensor        : shape (1, 4, 512, 512)
+        original_size : (width, height)
     """
-    original_size = image.size          # (W, H)
-    tensor = _preprocess_transform(image)   # (3, 512, 512)
-    tensor = tensor.unsqueeze(0)            # (1, 3, 512, 512)
+    h, w = image_data.shape[:2]
+    original_size = (w, h)
+    
+    # Convert to PIL for easy resizing
+    img = Image.fromarray(image_data)
+    img = img.resize(TARGET_SIZE, Image.BILINEAR)
+    arr = np.array(img).astype(np.float32) / 255.0
+    
+    # Handle padding for 3 -> 4 channels
+    if arr.shape[-1] == 3:
+        padding = np.zeros((TARGET_SIZE[0], TARGET_SIZE[1], 1), dtype=np.float32)
+        arr = np.concatenate([arr, padding], axis=-1)
+    
+    # Normalise first 3 channels with ImageNet mean/std
+    # (NIR normalization is usually content-dependent, here we keep it as-is [0,1])
+    arr[:, :, :3] = (arr[:, :, :3] - IMAGENET_MEAN) / IMAGENET_STD
+    
+    # To Tensor: (H, W, 4) -> (4, H, W) -> (1, 4, H, W)
+    tensor = torch.from_numpy(arr).permute(2, 0, 1).unsqueeze(0)
     return tensor, original_size
 
 
