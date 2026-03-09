@@ -21,3 +21,11 @@ frontend/.env
 .vscode/
 .idea/
 *.log
+
+__pycache__/
+
+# images
+backend/static/change_maps
+backend/app/weights/*.h5
+backend/app/weights/*.pth
+backend/scripts
