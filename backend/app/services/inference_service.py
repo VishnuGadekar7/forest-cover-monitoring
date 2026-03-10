@@ -212,11 +212,15 @@ class InferenceService:
             # 4. Re-stack the tensor with the synthesized NIR band
             tensor = torch.cat([red, green, blue, fake_nir], dim=-3)
         else:
-            # 1. Base Sentinel-2 Normalization (Clip glare to 10000)
+            raw_max = tensor.max()
+
+            # Base Sentinel-2 Normalization (Clip glare to 10000)
             tensor = torch.clamp(tensor, min=0.0, max=10000.0) / 10000.0
             
-            # 2. ESA 2022 Offset Fix (Removes the +1000 artificial brightness)
-            tensor = torch.clamp(tensor - 0.1, min=0.0)
+            # ESA 2022 Offset Fix (Removes the +1000 artificial brightness)
+            # If the raw max exceeds 10000, it's a post-2022 image with the +1000 shift.
+            if raw_max > 10000.0:
+                tensor = torch.clamp(tensor - 0.1, min=0.0)
 
         # Move to execution device (CPU/GPU)
         tensor = tensor.to(self.device)
