@@ -39,6 +39,12 @@ class ChangeDetectionResponse(BaseModel):
     mask_t2_url: str = Field(
         ..., description="Relative URL to the predicted binary mask for T2"
     )
+    image_t1_url: str = Field(
+        ..., description="Relative URL to the original input image for T1"
+    )
+    image_t2_url: str = Field(
+        ..., description="Relative URL to the original input image for T2"
+    )
 
     model_config = {
         "json_schema_extra": {

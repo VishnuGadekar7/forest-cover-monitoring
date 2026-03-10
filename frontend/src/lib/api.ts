@@ -16,6 +16,8 @@ export interface ChangeDetectionResult {
   change_map_url: string;
   mask_t1_url: string;
   mask_t2_url: string;
+  image_t1_url: string;
+  image_t2_url: string;
 }
 
 /**
@@ -42,6 +44,27 @@ export async function detectChange(
         }
       },
     }
+  );
+  return response.data;
+}
+
+export interface STACQueryRequest {
+  bbox: [number, number, number, number];
+  date_t1: string;
+  date_t2: string;
+  max_cloud_cover?: number;
+}
+
+/**
+ * POST /api/v1/detect-change-automated
+ * Searches for and processes satellite tiles automatically based on a BBox.
+ */
+export async function detectChangeAutomated(
+  query: STACQueryRequest
+): Promise<ChangeDetectionResult> {
+  const response = await axios.post<ChangeDetectionResult>(
+    `${API_BASE}/detect-change-automated`,
+    query
   );
   return response.data;
 }

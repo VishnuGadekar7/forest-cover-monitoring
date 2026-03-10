@@ -24,6 +24,8 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
+logging.basicConfig(level=logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 # Map of registered PyTorch model names → their build_model factories
@@ -63,10 +65,10 @@ def _load_weights(model: nn.Module, weights_path: Optional[Path], device: torch.
         if "model_state_dict" in state_dict:
             state_dict = state_dict["model_state_dict"]
         model.load_state_dict(state_dict, strict=True)
-        logger.info(f"✅ Loaded weights from {weights_path}")
+        logger.info(f"Loaded weights from {weights_path}")
     else:
         logger.warning(
-            "⚠️  No weight file found — running with random initialisation. "
+            "No weight file found -- running with random initialisation. "
             "Place your .pth or .h5 file in backend/weights/ to enable real inference."
         )
     return model
@@ -74,32 +76,32 @@ def _load_weights(model: nn.Module, weights_path: Optional[Path], device: torch.
 
 class ModelLoader:
     """
-    Singleton that owns the loaded inference model.
-
-    Usage:
-        loader = ModelLoader.get_instance()
-        model  = loader.model
+    Manages loading and caching of different segmentation models.
+    Supports Attention U-Net, ResNet U-Net, and TransNet.
     """
-    _instance: Optional["ModelLoader"] = None
+    _instances: dict[str, "ModelLoader"] = {}
 
-    def __init__(self):
-        model_name  = os.getenv("MODEL_NAME", "attention_unet")
+    def __init__(self, model_name: str):
+        self.model_name = model_name
         device_pref = os.getenv("DEVICE", "auto")
-        weights_env = os.getenv("MODEL_WEIGHTS", "")
-
-        # Resolve weights path: env var takes priority, else look in weights/
-        if weights_env:
-            weights_path = Path(weights_env)
-        else:
-            # Try conventional names including .h5
-            candidates = [
-                WEIGHTS_DIR / f"{model_name}.pth",
-                WEIGHTS_DIR / f"{model_name}.h5",
-                WEIGHTS_DIR / "attention_unet_forest_trained_final.h5",
-                WEIGHTS_DIR / "model.pth",
-                WEIGHTS_DIR / "model.h5",
-            ]
-            weights_path = next((p for p in candidates if p.exists()), None)
+        
+        # Determine weight file
+        weights_dir = Path(__file__).resolve().parents[2] / "weights"
+        
+        # Map of model names to expected weight filenames
+        weight_map = {
+            "attention_unet": "attention_unet_best.h5",
+            "resnet_unet": "resnet_unet.pth",
+            "trans_unet": "trans_unet.pth"
+        }
+        
+        specific_weight = weight_map.get(model_name)
+        weights_path = weights_dir / specific_weight if specific_weight else None
+        
+        # Fallback logic: If weights don't exist, log warning
+        if weights_path and not weights_path.exists():
+            logger.warning(f"Weights for {model_name} not found at {weights_path}. Inference will be untrained.")
+            weights_path = None
 
         self.is_keras = False
 
@@ -107,13 +109,13 @@ class ModelLoader:
         # Keras / TensorFlow Model Loading Block
         # ---------------------------------------------------------
         if weights_path and weights_path.suffix in [".h5", ".keras"]:
-            import tensorflow as tf
-            logger.info(f"✅ Detected Keras weights from {weights_path}")
+            # print("DEBUG: loading keras model. model path:", weights_path)
+            logger.info(f"Detected Keras weights from {weights_path}")
             
             try:
                 # 1. Route to the correct Keras architecture
                 if model_name == "attention_unet":
-                    logger.info("🛠️  Building fresh Keras Attention U-Net architecture...")
+                    logger.info("Building fresh Keras Attention U-Net architecture...")
                     from app.models.keras_unet import build_keras_unet
                     self.model = build_keras_unet()                    
                 else:
@@ -122,12 +124,12 @@ class ModelLoader:
                 # 2. Inject the weights into the routed model
                 logger.info(f"📥 Loading weights from {weights_path} into {model_name}...")
                 self.model.load_weights(str(weights_path))
-                logger.info("✅ Successfully injected weights into Keras model.")
+                logger.info("Successfully injected weights into Keras model.")
                 
             except Exception as e:
-                logger.error(f"❌ Failed to load Keras model/weights: {e}")
+                logger.error(f"Failed to load Keras model/weights: {e}")
                 raise e
-                
+
             self.is_keras = True
             self.device = "tf-auto"
             return
@@ -136,11 +138,21 @@ class ModelLoader:
         # PyTorch Model Loading Block
         # ---------------------------------------------------------
         self.device = _resolve_device(device_pref)
-        logger.info(f"🖥️  Inference device: {self.device}")
-
+        logger.info(f"Loading PyTorch model {model_name} on {self.device}...")
+        
         self.model = _import_and_build(model_name, self.device)
         _load_weights(self.model, weights_path, self.device)
         self.model.eval()
+
+    @classmethod
+    def get_model(cls, model_name: str = None) -> "ModelLoader":
+        """Get or create a model instance by name. Defaults to attention_unet."""
+        if model_name is None:
+            model_name = os.getenv("MODEL_NAME", "attention_unet")
+            
+        if model_name not in cls._instances:
+            cls._instances[model_name] = cls(model_name)
+        return cls._instances[model_name]
 
     @classmethod
     def get_instance(cls) -> "ModelLoader":

@@ -17,27 +17,25 @@ from PIL import Image
 import tensorflow as tf
 import torch.nn.functional as F
 
+from typing import Union
+
 from app.services.model_loader import ModelLoader
 from app.utils.image_preprocessing import preprocess, postprocess_mask
 
 
 class InferenceService:
     """
-    Runs semantic segmentation inference using the singleton model.
-
-    Usage:
-        service = InferenceService()
-        mask = service.predict(pil_image)   # numpy array (H, W), values {0,1}
+    Runs semantic segmentation inference using one of the available models.
     """
 
-    def __init__(self, threshold: float = 0.5):
+    def __init__(self, model_name: str = "attention_unet", threshold: float = 0.5):
         """
         Args:
-            threshold: Sigmoid output threshold for classifying a pixel as
-                       forest (default 0.5 — can be tuned per dataset).
+            model_name: Name of the model to use (attention_unet, resnet_unet, transnet).
+            threshold: Sigmoid output threshold for forest classification.
         """
         self.threshold = threshold
-        loader = ModelLoader.get_instance()
+        loader = ModelLoader.get_model(model_name)
         self.model = loader.model
         self.device = loader.device
         self.is_keras = getattr(loader, "is_keras", False)
@@ -49,37 +47,86 @@ class InferenceService:
             reduce_retracing=True
         )
 
-    def predict(self, image: Image.Image) -> np.ndarray:
+    def predict(self, image_data: Union[Image.Image, np.ndarray]) -> np.ndarray:
         """
-        Run segmentation inference on a single PIL image.
+        Run segmentation inference. Accepts PIL Image (RGB) or Numpy Array (H, W, C).
         Automatically routes to PyTorch or Keras depending on the model.
         """
+        if isinstance(image_data, Image.Image):
+            image_data = np.array(image_data)
+            
         if self.is_keras:
-            return self._predict_keras(image)
-        return self._predict_pytorch(image)
+            return self._predict_keras(image_data)
+        return self._predict_pytorch(image_data)
 
     def _predict_keras(self, arr: np.ndarray) -> np.ndarray:
-        # 1. Resize if not already 512x512
+        original_h, original_w = arr.shape[:2]
+
+        # Resize if not already 512x512
         if arr.shape[0] != 512 or arr.shape[1] != 512:
-            resized = tf.image.resize(arr, [512, 512])
-            arr = resized.numpy()
+            arr_resized = tf.image.resize(arr, [512, 512])
+        else:
+            arr_resized = tf.cast(arr, tf.float32)
 
-        # 2. Normalize
-        max_val = 255.0 if np.max(arr) <= 255.0 else 10000.0
-        arr = arr.astype(np.float32) / max_val
+        # Radiometric Translation & Normalization
+        # Use a strict check: if raw array max is <= 255, it's a PNG/JPG
+        if tf.reduce_max(arr_resized) <= 255.0:
+            arr_norm = arr_resized / 255.0
+            
+            red = arr_norm[..., 0:1]
+            green = arr_norm[..., 1:2]
+            blue = arr_norm[..., 2:3]
+            
+            # Synthesize Fake NIR with Blue Penalty
+            exg = (2.0 * green) - red - (blue * 2.0)
+            fake_nir = tf.clip_by_value(green + exg, 0.0, 1.0)
+            
+            # Darken to simulate satellite reflectance
+            red = red * 0.35
+            green = green * 0.35
+            blue = blue * 0.5
+            
+            input_tensor = tf.concat([red, green, blue, fake_nir], axis=-1)
+        else:
+            # 16-bit GeoTIFF Base Normalization
+            arr_norm = tf.clip_by_value(arr_resized, 0.0, 10000.0) / 10000.0
+            
+            # ESA OFFSET APPLIED
+            input_tensor = tf.clip_by_value(arr_norm - 0.1, 0.0, 1.0)
 
-        # 3. FIX: Add the Batch Dimension
-        # This changes shape from (512, 512, 4) to (1, 512, 512, 4)
-        input_tensor = tf.convert_to_tensor(arr)
+        # Add the Batch Dimension -> (1, 512, 512, 4)
         input_tensor = tf.expand_dims(input_tensor, axis=0) 
 
-        # 4. Forward pass via XLA-compiled function
-        # training=False is passed here to ensure correct behavior
+        # Forward pass via XLA-compiled function
         probs = self._compiled_predict(input_tensor, training=False)
         
-        # 5. Remove batch dimension from output to get back to (512, 512)
-        return np.squeeze(probs.numpy())
-    
+        # Create initial 512x512 binary mask
+        mask_512 = tf.cast(probs > self.threshold, tf.float32)
+
+        # THE NDVI VETO (Pure TensorFlow)
+        # Keras is Channel-Last! Red is index 0, NIR is index 3.
+        red_band = input_tensor[..., 0:1]
+        nir_band = input_tensor[..., 3:4]
+        
+        # Calculate NDVI 
+        ndvi = (nir_band - red_band) / (nir_band + red_band + 1e-8)
+        
+        # Apply Veto: If mask is 1 AND ndvi is < 0.25, force it to 0. 
+        veto_condition = tf.logical_and(mask_512 == 1.0, ndvi < 0.25)
+        mask_512_cleaned = tf.where(veto_condition, tf.zeros_like(mask_512), mask_512)
+
+        # Resize the CLEANED map back to original dimensions
+        mask_resized = tf.image.resize(
+            mask_512_cleaned, 
+            [original_h, original_w], 
+            method=tf.image.ResizeMethod.NEAREST_NEIGHBOR
+        )
+
+        # Clean up dims and convert back to numpy
+        mask_np = tf.squeeze(mask_resized).numpy().astype(np.uint8)
+
+        return mask_np
+
     # def _predict_keras(self, image_array: np.ndarray) -> np.ndarray:
     #     """Keras (.h5) inference pipeline for multispectral numpy arrays."""
     #     original_h, original_w = image_array.shape[:2]

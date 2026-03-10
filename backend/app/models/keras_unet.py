@@ -1,4 +1,12 @@
+"""
+Keras Attention U-Net
+======================
+Exact replica of the Colab training architecture so that positional
+weight loading (load_weights without by_name) works correctly.
+"""
+
 import tensorflow as tf
+from tensorflow.keras import models
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, Add, Activation, Multiply, Concatenate
 
 def build_keras_unet(input_shape=(512, 512, 4)):

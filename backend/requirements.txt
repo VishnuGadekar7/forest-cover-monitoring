@@ -18,10 +18,13 @@ segmentation-models-pytorch==0.3.3
 timm
 
 # ─── Geospatial Stack (requires GDAL system binaries — use conda or pip from wheel)
-# rasterio==1.3.9
+rasterio==1.3.9
 # geopandas==0.14.3
 # shapely==2.0.4
 # pyproj==3.6.1
+
+# --- STAC Integration ---
+pystac-client==0.7.6
 
 # ─── Validation & Utilities ───────────────────────────────────────────────────
 pydantic==2.6.4

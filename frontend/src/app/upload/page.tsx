@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import { Zap, AlertCircle, Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import UploadCard from "@/components/UploadCard";
-import { detectChange } from "@/lib/api";
+import STACMap from "@/components/STACMap";
+import { detectChange, detectChangeAutomated } from "@/lib/api";
 import type { ChangeDetectionResult } from "@/lib/api";
+import { motion, AnimatePresence } from "framer-motion";
+import { Map, Upload as UploadIcon } from "lucide-react";
 
 // Store result in sessionStorage so the results page can read it
 function storeResult(result: ChangeDetectionResult) {
@@ -15,6 +18,7 @@ function storeResult(result: ChangeDetectionResult) {
 
 export default function UploadPage() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<"manual" | "automated">("manual");
   const [imageT1, setImageT1] = useState<File | null>(null);
   const [imageT2, setImageT2] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,14 +37,41 @@ export default function UploadPage() {
       storeResult(result);
       router.push("/results");
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.detail ??
-        err?.message ??
-        "An unexpected error occurred. Is the backend running?";
-      setError(msg);
+      handleApiError(err);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAutomateQuery = async (bbox: [number, number, number, number], dateT1: string, dateT2: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await detectChangeAutomated({
+        bbox,
+        date_t1: dateT1,
+        date_t2: dateT2,
+        max_cloud_cover: 20
+      });
+      storeResult(result);
+      router.push("/results");
+    } catch (err: any) {
+      handleApiError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApiError = (err: any) => {
+    const msg =
+      err?.response?.data?.detail ??
+      err?.message ??
+      "An unexpected error occurred. Is the backend running?";
+    setError(msg);
+    // Auto-scroll to error
+    setTimeout(() => {
+      document.getElementById("error-box")?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   };
 
   return (
@@ -64,73 +95,125 @@ export default function UploadPage() {
           </p>
         </div>
 
-        {/* Upload panel */}
-        <div className="glass-card glow-border p-8 mb-6">
-          <div className="grid md:grid-cols-2 gap-8">
-            <UploadCard
-              label="Time Period 1 (Earlier)"
-              badge="T₁"
-              file={imageT1}
-              onFile={setImageT1}
-              onClear={() => setImageT1(null)}
-            />
-            <UploadCard
-              label="Time Period 2 (Later)"
-              badge="T₂"
-              file={imageT2}
-              onFile={setImageT2}
-              onClear={() => setImageT2(null)}
-            />
-          </div>
-
-          {/* Progress bar */}
-          {loading && (
-            <div className="mt-6">
-              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-                <span>Uploading & running inference…</span>
-                <span>{progress}%</span>
-              </div>
-              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-green-500 to-blue-500 rounded-full transition-all duration-300"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="mt-5 flex items-start gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-
-          {/* Action button */}
-          <div className="mt-8 flex justify-center">
+        {/* Tab Switcher */}
+        <div className="flex justify-center mb-10">
+          <div className="bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800/50 flex items-center gap-1.5 backdrop-blur-md">
             <button
-              id="detect-button"
-              onClick={handleDetect}
-              disabled={!canDetect}
-              className={`relative flex items-center gap-3 px-10 py-4 rounded-xl font-semibold text-base transition-all duration-300 ${canDetect
-                ? "bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-500 hover:to-blue-500 text-white shadow-lg shadow-green-900/30 hover:shadow-green-900/50 hover:scale-[1.02]"
-                : "bg-slate-800 text-slate-600 cursor-not-allowed"
-                }`}
+              onClick={() => setActiveTab("manual")}
+              className={`flex items-center gap-2.5 px-7 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === "manual" ? "bg-slate-800 text-white shadow-lg ring-1 ring-slate-700/50" : "text-slate-500 hover:text-slate-300"}`}
             >
-              {loading ? (
-                <>
-                  <Loader2 className="w-5 h-5 spin-slow" />
-                  Analysing…
-                </>
-              ) : (
-                <>
-                  <Zap className="w-5 h-5" />
-                  Detect Forest Change
-                </>
-              )}
+              <UploadIcon className="w-4 h-4" />
+              Manual Upload
+            </button>
+            <button
+              onClick={() => setActiveTab("automated")}
+              className={`flex items-center gap-2.5 px-7 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === "automated" ? "bg-slate-800 text-white shadow-lg ring-1 ring-slate-700/50" : "text-slate-500 hover:text-slate-300"}`}
+            >
+              <Map className="w-4 h-4" />
+              Automated Ingestion
             </button>
           </div>
+        </div>
+
+        {/* Dynamic Content */}
+        <div className="relative">
+          <AnimatePresence mode="wait">
+            {activeTab === "manual" ? (
+              <motion.div
+                key="manual"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className="glass-card glow-border p-8 mb-8"
+              >
+                <div className="grid md:grid-cols-2 gap-8">
+                  <UploadCard
+                    label="Time Period 1 (Earlier)"
+                    badge="T₁"
+                    file={imageT1}
+                    onFile={setImageT1}
+                    onClear={() => setImageT1(null)}
+                  />
+                  <UploadCard
+                    label="Time Period 2 (Later)"
+                    badge="T₂"
+                    file={imageT2}
+                    onFile={setImageT2}
+                    onClear={() => setImageT2(null)}
+                  />
+                </div>
+
+                {/* Progress bar */}
+                {loading && (
+                  <div className="mt-8 animate-pulse">
+                    <div className="flex justify-between text-[11px] text-slate-500 mb-2 uppercase tracking-tight font-medium">
+                      <span>Uploading & Processing Data…</span>
+                      <span>{progress}%</span>
+                    </div>
+                    <div className="h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+                      <div
+                        className="h-full bg-gradient-to-r from-green-500 via-blue-500 to-purple-500 rounded-full transition-all duration-500"
+                        style={{ width: `${progress}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Action button */}
+                <div className="mt-10 flex justify-center">
+                  <button
+                    id="detect-button"
+                    onClick={handleDetect}
+                    disabled={!canDetect}
+                    className={`relative flex items-center gap-3 px-12 py-4 rounded-2xl font-bold text-base transition-all duration-300 ${canDetect
+                      ? "bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-500 hover:to-blue-500 text-white shadow-xl shadow-green-900/30 hover:shadow-green-900/50 hover:scale-[1.03] active:scale-95"
+                      : "bg-slate-800/50 text-slate-600 cursor-not-allowed border border-slate-800"
+                      }`}
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Processing…
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-5 h-5" />
+                        Detect Forest Change
+                      </>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            ) : (
+              <motion.div
+                key="automated"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3, ease: "easeOut" }}
+                className="mb-8"
+              >
+                <STACMap onQuery={handleAutomateQuery} loading={loading} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Global Error box */}
+          {error && (
+            <motion.div
+              id="error-box"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="mb-8 flex items-start gap-4 p-5 rounded-2xl bg-red-500/5 border border-red-500/20 text-red-400/90 text-sm shadow-2xl backdrop-blur-sm"
+            >
+              <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-bold text-red-400">Analysis Failed</p>
+                <p className="text-red-400/70 leading-relaxed font-medium">{error}</p>
+              </div>
+            </motion.div>
+          )}
         </div>
 
         {/* Instruction cards */}
