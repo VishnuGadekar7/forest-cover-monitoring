@@ -10,6 +10,7 @@ Orchestrates the complete forest change detection pipeline:
 """
 
 import io
+import os
 import logging
 import numpy as np
 from rasterio.io import MemoryFile
@@ -27,7 +28,11 @@ from app.utils.visualization import save_image, save_mask_as_image
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_inference = InferenceService()
+model_name = os.getenv("MODEL_NAME")
+if model_name:
+	_inference = InferenceService(model_name=model_name)
+else:
+	_inference = InferenceService()
 
 def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
     """
@@ -95,13 +100,46 @@ async def detect_change(
         logger.exception("Inference failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Inference error using {model_name}: {exc}",
+            # detail=f"Inference error using {model_name}: {exc}",
+			detail=f"Inference error: {exc}"
         )
 
     # ── 4. Change Detection & Stats ───────────────────────────────────────────
     change_rgb, _ = generate_change_map(mask_t1, mask_t2)
     change_pil    = change_map_to_pil(change_rgb)
     stats = compute_statistics(mask_t1, mask_t2)
+
+    # ── Prepare arrays for PIL (Convert 16-bit to 8-bit strictly for saving) ──
+    def prep_for_pil(arr: np.ndarray) -> np.ndarray:
+        """
+        Prepares a 16-bit or float array for 8-bit PIL Image rendering.
+        Applies a 98th percentile stretch and gamma correction to brighten the image.
+        """
+        if arr.dtype != np.uint8:
+            # 1. The 98th Percentile Stretch
+            # Ignore the blindingly bright outliers (clouds, glare)
+            v_max = np.percentile(arr, 98)
+            
+            # Fallback to absolute max if the image is incredibly uniform/dark
+            if v_max == 0:
+                v_max = arr.max() if arr.max() > 0 else 1
+                
+            # Normalize strictly between 0.0 and 1.0 based on that 98th percentile cap
+            normalized = np.clip(arr / v_max, 0.0, 1.0)
+            
+            # 2. Gamma Correction (Mid-tone Boost)
+            # Gamma > 1.0 brightens the darks and mid-tones without blowing out the whites.
+            # 1.2 is a solid baseline for Sentinel-2 data; increase to 1.5 if still too dark.
+            gamma = 1.2 
+            brightened = np.power(normalized, 1.0 / gamma)
+            
+            # 3. Scale to 255 and cast
+            return (brightened * 255.0).astype(np.uint8)
+            
+        return arr
+        
+    pil_t1 = prep_for_pil(arr_t1)
+    pil_t2 = prep_for_pil(arr_t2)
 
     # ── 5. Save Output Images ─────────────────────────────────────────────────
     _, change_map_url = save_image(change_pil, "change")
@@ -115,4 +153,6 @@ async def detect_change(
         change_map_url=change_map_url,
         mask_t1_url=mask_t1_url,
         mask_t2_url=mask_t2_url,
+		image_t1_url=image_t1_url,
+		image_t2_url=image_t2_url
     )
