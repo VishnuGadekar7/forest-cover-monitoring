@@ -141,8 +141,29 @@ class InferenceService:
 
 		# Step 4: Normalization & Distribution Shift
         if tensor.max() <= 255.0:
-            # Fallback for standard 8-bit standard images
+            # 1. Base normalization to 0.0 - 1.0
             tensor = tensor / 255.0
+            
+            # Extract visible bands (Works with shape [C, H, W] or [B, C, H, W])
+            red = tensor[..., 0:1, :, :]
+            green = tensor[..., 1:2, :, :]
+            blue = tensor[..., 2:3, :, :]
+            
+            # 2. Synthesize Physical NIR (With aggressive Blue Penalty for Water)
+            # We multiply blue by 2.0. If the pixel is a river, the high blue value 
+            # will completely destroy the ExG score, dropping NIR to 0.
+            exg = (2.0 * green) - red - (blue * 2.0)
+            
+            # Create the Fake NIR and prevent negative numbers
+            fake_nir = torch.clamp(green + exg, min=0.0, max=1.0)
+            
+            # 3. Simulate Satellite Reflectance (Darken visible bands)
+            red = red * 0.35
+            green = green * 0.35
+            blue = blue * 0.5
+            
+            # 4. Re-stack the tensor with the synthesized NIR band
+            tensor = torch.cat([red, green, blue, fake_nir], dim=-3)
         else:
             # 1. Base Sentinel-2 Normalization (Clip glare to 10000)
             tensor = torch.clamp(tensor, min=0.0, max=10000.0) / 10000.0
