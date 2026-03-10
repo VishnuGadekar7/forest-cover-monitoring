@@ -26,15 +26,15 @@ import torch.nn as nn
 
 logger = logging.getLogger(__name__)
 
-# Map of registered model names → their build_model factories
+# Map of registered PyTorch model names → their build_model factories
 _MODEL_REGISTRY: dict[str, str] = {
     "attention_unet": "app.models.attention_unet",
     "resnet_unet":    "app.models.resnet_unet",
     "transnet":       "app.models.transnet",
+	"trans_unet":     "app.models.trans_unet"
 }
 
-WEIGHTS_DIR = Path(__file__).resolve().parents[2] / "weights"
-
+WEIGHTS_DIR = Path(__file__).resolve().parents[1] / "weights"
 
 def _resolve_device(preference: str) -> torch.device:
     if preference == "auto":
@@ -43,7 +43,7 @@ def _resolve_device(preference: str) -> torch.device:
 
 
 def _import_and_build(model_name: str, device: torch.device) -> nn.Module:
-    """Dynamically import the requested model module and call build_model()."""
+    """Dynamically import the requested PyTorch model module and call build_model()."""
     if model_name not in _MODEL_REGISTRY:
         raise ValueError(
             f"Unknown model '{model_name}'. "
@@ -56,7 +56,7 @@ def _import_and_build(model_name: str, device: torch.device) -> nn.Module:
 
 
 def _load_weights(model: nn.Module, weights_path: Optional[Path], device: torch.device) -> nn.Module:
-    """Load pretrained weights if a .pth file exists; otherwise run with random init."""
+    """Load pretrained PyTorch weights if a .pth file exists; otherwise run with random init."""
     if weights_path and weights_path.exists():
         state_dict = torch.load(str(weights_path), map_location=device)
         # Handle both raw state_dicts and checkpoint dicts with 'model_state_dict' key
@@ -102,66 +102,44 @@ class ModelLoader:
             weights_path = None
 
         self.is_keras = False
-        
-        # Handle Keras/TensorFlow (.h5) models
+
+        # ---------------------------------------------------------
+        # Keras / TensorFlow Model Loading Block
+        # ---------------------------------------------------------
         if weights_path and weights_path.suffix in [".h5", ".keras"]:
             import tensorflow as tf
-            import tensorflow.keras.backend as K
-            from app.models.keras_unet import build_keras_unet
-
-            # Custom loss functions matching Colab training setup
-            def dice_coef(y_true, y_pred, smooth=1):
-                intersection = K.sum(y_true * y_pred)
-                return (2. * intersection + smooth) / (K.sum(y_true) + K.sum(y_pred) + smooth)
-
-            def bce_dice_loss(y_true, y_pred):
-                bce = tf.keras.losses.binary_crossentropy(y_true, y_pred)
-                dice = 1 - dice_coef(y_true, y_pred)
-                return bce + dice
-
+            logger.info(f"✅ Detected Keras weights from {weights_path}")
+            
             try:
-                logger.info(f"Building Keras model for {model_name}...")
-                self.model = build_keras_unet()
+                # 1. Route to the correct Keras architecture
+                if model_name == "attention_unet":
+                    logger.info("🛠️  Building fresh Keras Attention U-Net architecture...")
+                    from app.models.keras_unet import build_keras_unet
+                    self.model = build_keras_unet()                    
+                else:
+                    raise ValueError(f"Unknown Keras model '{model_name}'.")
 
-                # Compile with same loss/metrics used in Colab training
-                self.model.compile(
-                    optimizer=tf.keras.optimizers.Adam(1e-4),
-                    loss=bce_dice_loss,
-                    metrics=["accuracy", dice_coef]
-                )
-
-                logger.info(f"Loading weights from {weights_path}...")
+                # 2. Inject the weights into the routed model
+                logger.info(f"📥 Loading weights from {weights_path} into {model_name}...")
                 self.model.load_weights(str(weights_path))
-                self.is_keras = True
-                self.device = "tf-auto"
-                return
+                logger.info("✅ Successfully injected weights into Keras model.")
+                
             except Exception as e:
-                logger.error(f"Failed to load Keras weights: {e}")
+                logger.error(f"❌ Failed to load Keras model/weights: {e}")
                 raise e
 
-        # Handle PyTorch (.pth) models
+        # ---------------------------------------------------------
+        # PyTorch Model Loading Block
+        # ---------------------------------------------------------
         self.device = _resolve_device(device_pref)
         logger.info(f"Loading PyTorch model {model_name} on {self.device}...")
         
         self.model = _import_and_build(model_name, self.device)
+        _load_weights(self.model, weights_path, self.device)
         self.model.eval()
-
-        if weights_path:
-            _load_weights(self.model, weights_path, self.device)
-        else:
-            logger.warning(f"Starting {model_name} with random weights.")
-
-    @classmethod
-    def get_model(cls, model_name: str = None) -> "ModelLoader":
-        """Get or create a model instance by name. Defaults to attention_unet."""
-        if model_name is None:
-            model_name = os.getenv("MODEL_NAME", "attention_unet")
-            
-        if model_name not in cls._instances:
-            cls._instances[model_name] = cls(model_name)
-        return cls._instances[model_name]
 
     @classmethod
     def get_instance(cls) -> "ModelLoader":
-        """Legacy support for singleton access."""
-        return cls.get_model()
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance

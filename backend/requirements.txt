@@ -6,8 +6,8 @@ aiofiles==23.2.1
 
 # ─── Data Science & ML ────────────────────────────────────────────────────────
 torch==2.2.2
-torchvision==0.17.2
-tensorflow==2.15.0
+# torchvision==0.17.2
+# # tensorflow==2.16.1
 numpy==1.26.4
 Pillow==10.3.0
 opencv-python==4.9.0.80
@@ -15,6 +15,7 @@ scikit-image==0.22.0
 
 # ─── Segmentation Models (wraps ResNet encoders) ──────────────────────────────
 segmentation-models-pytorch==0.3.3
+timm
 
 # ─── Geospatial Stack (requires GDAL system binaries — use conda or pip from wheel)
 rasterio==1.3.9

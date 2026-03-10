@@ -3,6 +3,9 @@
 import { useEffect, useRef } from "react";
 import { assetUrl } from "@/lib/api";
 
+// Leaflet CSS prevents the gray box/broken tile rendering bug
+import "leaflet/dist/leaflet.css";
+
 interface ChangeMapProps {
   changeMapUrl: string;
 }
@@ -12,11 +15,23 @@ export default function ChangeMap({ changeMapUrl }: ChangeMapProps) {
   const mapInstance = useRef<any>(null);
 
   useEffect(() => {
-    if (!mapRef.current || mapInstance.current) return;
+    if (!mapRef.current) return;
+
+    // Track if the component is actually alive
+    let isMounted = true; 
+
+    const container = mapRef.current as any;
+    if (container._leaflet_id) return;
 
     // Dynamically import Leaflet (SSR-safe)
     import("leaflet").then((L) => {
+      // If React unmounted this component while we were downloading Leaflet, abort!
+      if (!isMounted) return;
+
       const leaflet = L.default;
+
+      // Double check the DOM right before creation just to be absolutely safe
+      if (container._leaflet_id) return;
 
       // Fix default icon path for Next.js
       delete (leaflet.Icon.Default.prototype as any)._getIconUrl;
@@ -27,23 +42,21 @@ export default function ChangeMap({ changeMapUrl }: ChangeMapProps) {
       });
 
       const map = leaflet.map(mapRef.current!, {
-        center: [20.5937, 78.9629],  // Geographic center of India
+        center: [20.5937, 78.9629],  
         zoom: 5,
         zoomControl: true,
         attributionControl: true,
       });
-
+      
       // Dark satellite basemap (CartoDB Dark)
       leaflet.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        {
-          attribution: '&copy; <a href="https://carto.com">CARTO</a>',
-          maxZoom: 19,
-        }
+          "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+          {
+              attribution: '&copy; <a href="https://carto.com">CARTO</a>',
+              maxZoom: 19,
+          }
       ).addTo(map);
-
-      // Overlay the change map image over India as a placeholder region
-      // In production, use actual image bounds from rasterio metadata
+        
       const imageBounds: [[number, number], [number, number]] = [
         [8.0, 68.0],
         [37.0, 97.5],
@@ -69,13 +82,28 @@ export default function ChangeMap({ changeMapUrl }: ChangeMapProps) {
       legend.addTo(map);
 
       mapInstance.current = map;
+
+      // Watch for div resizing to prevent missing tiles
+      const resizeObserver = new ResizeObserver(() => {
+        map.invalidateSize();
+      });
+      resizeObserver.observe(container);
+      mapInstance.current._ro = resizeObserver; // Store to clean up later
     });
 
     return () => {
+      // Tell the promise to cancel itself if it's still running
+      isMounted = false; 
+
       if (mapInstance.current) {
+        if (mapInstance.current._ro) {
+          mapInstance.current._ro.disconnect();
+        }
+        mapInstance.current.off();
         mapInstance.current.remove();
         mapInstance.current = null;
       }
+      container._leaflet_id = null;
     };
   }, [changeMapUrl]);
 

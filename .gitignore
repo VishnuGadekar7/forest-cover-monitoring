@@ -23,5 +23,10 @@ frontend/.env
 .idea/
 *.log
 
-# Generated Assets
-backend/static/
+__pycache__/
+
+# images
+backend/static/change_maps
+backend/app/weights/*.h5
+backend/app/weights/*.pth
+backend/scripts
