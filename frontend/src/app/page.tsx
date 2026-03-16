@@ -56,7 +56,7 @@ export default function LandingPage() {
             <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
           </Link>
           <a
-            href="https://github.com"
+            href="https://github.com/VishnuGadekar7/forest-cover-monitoring"
             target="_blank"
             rel="noreferrer"
             className="px-8 py-4 rounded-xl font-semibold text-slate-300 bg-slate-800/50 border border-slate-700 hover:bg-slate-800 transition-colors"

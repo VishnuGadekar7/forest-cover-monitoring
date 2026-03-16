@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 import numpy as np
 
 from app.routes.detection import router as detection_router
-from app.routes.detection import _inference
+from app.services.inference_service import InferenceService
 from app.services.model_loader import ModelLoader
 
 # ── Startup / Shutdown lifecycle ─────────────────────────────────────────────
@@ -30,9 +30,10 @@ async def lifespan(app: FastAPI):
     dummy_input = np.zeros((512, 512, 4), dtype=np.float32)
     
     try:
-        # 2. Force the model to compile its graph and allocate memory
-        print(f"Passing dummy tensor of shape {dummy_input.shape} into model...")
-        _inference.predict(dummy_input)
+        # 2. Force the default model to compile its graph and allocate memory
+        print(f"Passing dummy tensor of shape {dummy_input.shape} into default model...")
+        inference = InferenceService(model_name="attention_unet")
+        inference.predict(dummy_input)
         print("Warm-up successful! The model is optimized and ready.")
     except Exception as e:
         print(f"CRITICAL: Model warm-up failed! Check your input shapes: {e}")

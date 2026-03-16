@@ -21,6 +21,7 @@ export default function UploadPage() {
   const [activeTab, setActiveTab] = useState<"manual" | "automated">("manual");
   const [imageT1, setImageT1] = useState<File | null>(null);
   const [imageT2, setImageT2] = useState<File | null>(null);
+  const [selectedModel, setSelectedModel] = useState("attention_unet");
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export default function UploadPage() {
     setProgress(0);
     setError(null);
     try {
-      const result = await detectChange(imageT1, imageT2, setProgress);
+      const result = await detectChange(imageT1, imageT2, selectedModel, setProgress);
       storeResult(result);
       router.push("/results");
     } catch (err: any) {
@@ -51,7 +52,8 @@ export default function UploadPage() {
         bbox,
         date_t1: dateT1,
         date_t2: dateT2,
-        max_cloud_cover: 20
+        max_cloud_cover: 20,
+        model_name: selectedModel
       });
       storeResult(result);
       router.push("/results");
@@ -112,6 +114,30 @@ export default function UploadPage() {
               <Map className="w-4 h-4" />
               Automated Ingestion
             </button>
+          </div>
+        </div>
+
+        {/* Global Model Selection */}
+        <div className="max-w-xl mx-auto mb-10">
+          <div className="glass-card glow-border p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <Zap className="w-4 h-4 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-200">Processing Model</h3>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Segmentation Architecture</p>
+              </div>
+            </div>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="w-full sm:w-auto bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/40 transition-all cursor-pointer hover:border-slate-600"
+            >
+              <option value="attention_unet">Attention U-Net (Default)</option>
+              <option value="resnet_unet">ResNet U-Net (Fast)</option>
+              <option value="trans_unet">Trans-UNet (Advanced)</option>
+            </select>
           </div>
         </div>
 

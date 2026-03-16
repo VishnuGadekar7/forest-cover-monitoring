@@ -14,7 +14,7 @@ import os
 import logging
 import numpy as np
 from rasterio.io import MemoryFile
-from fastapi import APIRouter, File, UploadFile, HTTPException, status
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Form
 from PIL import Image
 
 from app.schemas.detection import ChangeDetectionResponse
@@ -31,12 +31,6 @@ router = APIRouter()
 
 # Singleton for STAC service
 _stac_service = STACService()
-
-model_name = os.getenv("MODEL_NAME")
-if model_name:
-	_inference = InferenceService(model_name=model_name)
-else:
-	_inference = InferenceService()
 
 def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
     """
@@ -79,6 +73,7 @@ def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
 async def detect_change(
     image_t1: UploadFile = File(...),
     image_t2: UploadFile = File(...),
+    model_name: str = Form("attention_unet"),
 ):
     # ── 1. Read Bytes ─────────────────────────────────────────────────────────
     t1_bytes = await image_t1.read()
@@ -96,16 +91,18 @@ async def detect_change(
 
     # ── 3. Inference — pass numpy arrays ──────────────────────────────────────
     try:
-        logger.info("Running inference on T1...")
-        mask_t1 = _inference.predict(arr_t1)
-        logger.info("Running inference on T2...")
-        mask_t2 = _inference.predict(arr_t2)
+        # Initialize InferenceService with requested model
+        inference = InferenceService(model_name=model_name)
+        
+        logger.info(f"Running inference on T1 using {model_name}...")
+        mask_t1 = inference.predict(arr_t1)
+        logger.info(f"Running inference on T2 using {model_name}...")
+        mask_t2 = inference.predict(arr_t2)
     except Exception as exc:
         logger.exception("Inference failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            # detail=f"Inference error using {model_name}: {exc}",
-			detail=f"Inference error: {exc}"
+            detail=f"Inference error using {model_name}: {exc}"
         )
 
     # ── 4. Change Detection & Stats ───────────────────────────────────────────
