@@ -65,6 +65,50 @@ def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
         except Exception as e:
             raise ValueError(f"Failed to read standard image: {e}")
 
+def prep_for_pil(arr: np.ndarray) -> np.ndarray:
+    """Prepares a 16-bit or float array for 8-bit PIL Image rendering."""
+    if arr.dtype != np.uint8:
+        v_max = np.percentile(arr, 98)
+        if v_max == 0:
+            v_max = arr.max() if arr.max() > 0 else 1
+        normalized = np.clip(arr / v_max, 0.0, 1.0)
+        gamma = 1.2 
+        brightened = np.power(normalized, 1.0 / gamma)
+        return (brightened * 255.0).astype(np.uint8)
+    return arr
+
+def compute_ndwi_mask(arr: np.ndarray) -> np.ndarray:
+    """Calculates NDWI from a 4-band array and returns a boolean mask (> 0.0)."""
+    arr_f = arr.astype(np.float32)
+    # Ensure array has at least 4 bands before extracting Green(1) and NIR(3)
+    if arr_f.shape[-1] < 4:
+        return np.zeros((arr_f.shape[0], arr_f.shape[1]), dtype=bool)
+    
+    green = arr_f[..., 1]
+    nir = arr_f[..., 3]
+    epsilon = 1e-8
+    ndwi = (green - nir) / (green + nir + epsilon)
+    return ndwi > 0.0
+
+def create_hybrid_rgb_map(forest_mask: np.ndarray, snow_mask: np.ndarray) -> np.ndarray:
+    """
+    Creates an RGB image mapping the user's specific plotting criteria:
+    - Only Forest: Forest Green [34, 139, 34]
+    - Only Snow/Water: Royal Blue [65, 105, 225]
+    - Forest + Snow/Water: Cyan [0, 255, 255]
+    """
+    h, w = forest_mask.shape
+    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    
+    f_bool = forest_mask > 0
+    s_bool = snow_mask > 0
+    
+    rgb[f_bool & ~s_bool] = [34, 139, 34]   # Only Forest
+    rgb[~f_bool & s_bool] = [65, 105, 225]  # Only Snow/Water
+    rgb[f_bool & s_bool]  = [0, 255, 255]   # Both
+    
+    return rgb
+
 
 @router.post(
     "/detect-change",
@@ -109,35 +153,6 @@ async def detect_change(
     change_rgb, _ = generate_change_map(mask_t1, mask_t2)
     change_pil    = change_map_to_pil(change_rgb)
     stats = compute_statistics(mask_t1, mask_t2)
-
-    # ── Prepare arrays for PIL (Convert 16-bit to 8-bit strictly for saving) ──
-    def prep_for_pil(arr: np.ndarray) -> np.ndarray:
-        """
-        Prepares a 16-bit or float array for 8-bit PIL Image rendering.
-        Applies a 98th percentile stretch and gamma correction to brighten the image.
-        """
-        if arr.dtype != np.uint8:
-            # 1. The 98th Percentile Stretch
-            # Ignore the blindingly bright outliers (clouds, glare)
-            v_max = np.percentile(arr, 98)
-            
-            # Fallback to absolute max if the image is incredibly uniform/dark
-            if v_max == 0:
-                v_max = arr.max() if arr.max() > 0 else 1
-                
-            # Normalize strictly between 0.0 and 1.0 based on that 98th percentile cap
-            normalized = np.clip(arr / v_max, 0.0, 1.0)
-            
-            # 2. Gamma Correction (Mid-tone Boost)
-            # Gamma > 1.0 brightens the darks and mid-tones without blowing out the whites.
-            # 1.2 is a solid baseline for Sentinel-2 data; increase to 1.5 if still too dark.
-            gamma = 1.2 
-            brightened = np.power(normalized, 1.0 / gamma)
-            
-            # 3. Scale to 255 and cast
-            return (brightened * 255.0).astype(np.uint8)
-            
-        return arr
         
     pil_t1 = prep_for_pil(arr_t1)
     pil_t2 = prep_for_pil(arr_t2)
@@ -215,3 +230,84 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
     except Exception as e:
         logger.exception("Error during automated STAC change detection: %s", str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post(
+    "/detect-forest-snow",
+    response_model=ChangeDetectionResponse,
+    summary="Hybrid Forest and Snow/Water Detection"
+)
+async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadFile = File(...), model_name: str = Form("attention_unet")):
+    """
+    Detects forest using ML and snow/water using NDWI physics.
+    Plots explicit hybrid masks and enforces strict persistent-snow overlap on the change map.
+    """
+    # Read & Load Data
+    t1_bytes = await image_t1.read()
+    t2_bytes = await image_t2.read()
+    
+    try:
+        arr_t1 = load_image_to_numpy(t1_bytes, image_t1.filename or "unknown.tif")
+        arr_t2 = load_image_to_numpy(t2_bytes, image_t2.filename or "unknown.tif")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    # Inference: ML Forest & Physics Snow
+    try:
+        # Initialize InferenceService with requested model
+        inference = InferenceService(model_name=model_name)
+        
+        logger.info(f"Running inference on T1 using {model_name}...")
+        mask_forest_t1 = inference.predict(arr_t1)
+        logger.info(f"Running inference on T2 using {model_name}...")
+        mask_forest_t2 = inference.predict(arr_t2)
+    except Exception as exc:
+        logger.exception("Inference failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Inference error using {model_name}: {exc}"
+        )
+
+    mask_snow_t1 = compute_ndwi_mask(arr_t1)
+    mask_snow_t2 = compute_ndwi_mask(arr_t2)
+
+    # Generate the Hybrid T1 and T2 Classification Maps
+    rgb_hybrid_t1 = create_hybrid_rgb_map(mask_forest_t1, mask_snow_t1)
+    rgb_hybrid_t2 = create_hybrid_rgb_map(mask_forest_t2, mask_snow_t2)
+
+    # Generate the Advanced Change Map
+    base_change_rgb, _ = generate_change_map(mask_forest_t1, mask_forest_t2)
+    hybrid_change_rgb = base_change_rgb.copy()
+    
+    # Show snow/water ONLY at pixels where it is present in BOTH images
+    persistent_snow = mask_snow_t1 & mask_snow_t2
+    persistent_forest = (mask_forest_t1 > 0) & (mask_forest_t2 > 0)
+    
+    # Overlay the persistent snow logic onto the base change map
+    hybrid_change_rgb[persistent_snow] = [65, 105, 225]                     # Only Snow
+    hybrid_change_rgb[persistent_snow & persistent_forest] = [0, 255, 255]  # Both
+    
+    hybrid_change_pil = Image.fromarray(hybrid_change_rgb)
+    
+    # Compute base forest statistics
+    stats = compute_statistics(mask_forest_t1, mask_forest_t2)
+
+    # Save Images 
+    # Note: Using `save_image` for masks instead of `save_mask_as_image` 
+    # because our arrays are already fully color-coded RGB representations, not raw classes.
+    pil_t1 = prep_for_pil(arr_t1)
+    pil_t2 = prep_for_pil(arr_t2)
+
+    _, change_map_url = save_image(hybrid_change_pil, "hybrid_change")
+    _, mask_t1_url    = save_image(Image.fromarray(rgb_hybrid_t1), "hybrid_mask_t1")
+    _, mask_t2_url    = save_image(Image.fromarray(rgb_hybrid_t2), "hybrid_mask_t2")
+    _, image_t1_url   = save_image(Image.fromarray(pil_t1), "input_t1")
+    _, image_t2_url   = save_image(Image.fromarray(pil_t2), "input_t2")
+
+    return ChangeDetectionResponse(
+        **stats,
+        change_map_url=change_map_url,
+        mask_t1_url=mask_t1_url,
+        mask_t2_url=mask_t2_url,
+        image_t1_url=image_t1_url,
+        image_t2_url=image_t2_url,
+    )

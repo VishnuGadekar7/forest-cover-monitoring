@@ -50,6 +50,37 @@ export async function detectChange(
   return response.data;
 }
 
+/**
+ * POST /api/v1/detect-forest-snow
+ * Sends the two image files and returns the full detection result.
+ */
+export async function detectForestSnow(
+  imageT1: File,
+  imageT2: File,
+  modelName: string = "attention_unet",
+  onProgress?: (pct: number) => void
+): Promise<ChangeDetectionResult> {
+  const form = new FormData();
+  form.append("image_t1", imageT1);
+  form.append("image_t2", imageT2);
+  form.append("model_name", modelName);
+
+  const response = await axios.post<ChangeDetectionResult>(
+    `${API_BASE}/detect-forest-snow`,
+    form,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) {
+          onProgress(Math.round((e.loaded * 100) / e.total));
+        }
+      },
+    }
+  );
+  return response.data;
+}
+
+
 export interface STACQueryRequest {
   bbox: [number, number, number, number];
   date_t1: string;
