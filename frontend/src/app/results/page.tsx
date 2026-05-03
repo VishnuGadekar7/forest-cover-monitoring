@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
-  TreePine, TrendingDown, TrendingUp, BarChart2, ArrowLeft, Map
+  TreePine, TrendingDown, TrendingUp, BarChart2, ArrowLeft, Map, Download, X
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Navbar from "@/components/Navbar";
 import StatCard from "@/components/StatCard";
 import ForestChart from "@/components/ForestChart";
-import { assetUrl } from "@/lib/api";
+import { assetUrl, exportChangeMapTif } from "@/lib/api";
 import type { ChangeDetectionResult } from "@/lib/api";
 
 // ── Leaflet must be loaded client-side only (no SSR) ──────────────────────
@@ -17,14 +17,68 @@ const ChangeMap = dynamic(() => import("@/components/ChangeMap"), { ssr: false }
 
 export default function ResultsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const targetId = searchParams.get("id"); // Get ID from URL e.g. /results?id=abc123xyz
+  
   const [result, setResult] = useState<ChangeDetectionResult | null>(null);
 
+  // Download Menu State
+  const [isDownloadOpen, setIsDownloadOpen] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState<"png" | "tif">("png");
+
   useEffect(() => {
-    const raw = sessionStorage.getItem("detection_result");
-    if (raw) {
-      setResult(JSON.parse(raw) as ChangeDetectionResult);
+    // Read the array from local storage
+    const savedHistory = localStorage.getItem("prediction_history");
+    const history = savedHistory ? JSON.parse(savedHistory) : [];
+    
+    if (history.length > 0) {
+      if (targetId) {
+        // Find the specific result the user clicked on
+        const foundResult = history.find((r: ChangeDetectionResult) => r.id === targetId);
+        setResult(foundResult || history[0]); // fallback to newest if ID not found
+      } else {
+        // Fallback: Just show the most recent one
+        setResult(history[0]);
+      }
     }
-  }, []);
+  }, [targetId]);
+
+  const handleDownload = async () => {
+    if (!result) return;
+
+    if (downloadFormat === "png") {
+      // Standard frontend PNG download
+      const link = document.createElement("a");
+      link.href = assetUrl(result.change_map_url);
+	    link.target = '_blank';
+      link.download = `change_map_${result.id}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      // TIF Download: Hit the backend API to generate the GeoTIFF
+      try {
+        const blob = await exportChangeMapTif(result.id, 4326);
+        
+        // Create a temporary object URL to trigger the browser download
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `change_map_${result.id}.tif`;
+        
+        document.body.appendChild(link);
+        link.click();
+        
+        // Cleanup the DOM and memory
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error("Failed to export TIF:", error);
+        alert("Failed to generate TIF export. Check backend logs.");
+      }
+    }     
+    setIsDownloadOpen(false);
+  };
 
   if (!result) {
     return (
@@ -48,8 +102,80 @@ export default function ResultsPage() {
   const lossColor = result.percentage_change < 0 ? "red" : "green";
 
   return (
-    <div className="min-h-screen bg-[#0a0f1a]">
+    <div className="min-h-screen bg-[#0a0f1a] relative">
       <Navbar />
+
+      {/* --- Download Modal --- */}
+      {isDownloadOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="glass-card w-full max-w-md p-6 relative animate-in fade-in zoom-in-95 duration-200">
+            <button 
+              onClick={() => setIsDownloadOpen(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            
+            <h3 className="text-xl font-bold text-white mb-1">Export Results</h3>
+            <p className="text-sm text-slate-400 mb-6">Configure your output map parameters.</p>
+
+            <div className="space-y-5">
+              {/* Format Selection */}
+              <div>
+                <label className="block text-sm font-medium text-slate-300 mb-2">File Format</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setDownloadFormat("png")}
+                    className={`py-2 px-4 rounded-lg border text-sm font-medium transition-all ${
+                      downloadFormat === "png" 
+                      ? "bg-blue-600/20 border-blue-500 text-blue-400" 
+                      : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800"
+                    }`}
+                  >
+                    PNG (Standard)
+                  </button>
+                  <button
+                    onClick={() => setDownloadFormat("tif")}
+                    className={`py-2 px-4 rounded-lg border text-sm font-medium transition-all ${
+                      downloadFormat === "tif" 
+                      ? "bg-blue-600/20 border-blue-500 text-blue-400" 
+                      : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800"
+                    }`}
+                  >
+                    TIF (Geospatial)
+                  </button>
+                </div>
+              </div>
+
+              {/* Locked Geospatial Options */}
+              <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-300">Coordinate Reference System</span>
+                  <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">EPSG:4326</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-300">Resolution</span>
+                  <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">Original Dimensions</span>
+                </div>
+                {downloadFormat === "tif" && (
+                  <div className="flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+                    <span className="text-sm text-slate-300">Data Type</span>
+                    <span className="text-xs font-mono bg-blue-900/30 text-blue-400 border border-blue-800 px-2 py-1 rounded">16-bit Integer</span>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={handleDownload}
+                className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2 mt-4"
+              >
+                <Download className="w-4 h-4" />
+                Download Map
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="pt-24 pb-16 px-4 max-w-6xl mx-auto">
         {/* Header */}
@@ -72,6 +198,14 @@ export default function ResultsPage() {
               {result.percentage_change.toFixed(2)}%
             </span>
             <span className="text-slate-500 text-sm">net change</span>
+            {/* Download Button */}
+            <button 
+              onClick={() => setIsDownloadOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-200 transition-colors ml-4"
+            >
+              <Download className="w-4 h-4" />
+              Export Map
+            </button>
           </div>
         </div>
 

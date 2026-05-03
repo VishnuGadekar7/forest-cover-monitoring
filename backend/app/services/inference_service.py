@@ -39,7 +39,7 @@ class InferenceService:
         self.model = loader.model
         self.device = loader.device
         self.is_keras = getattr(loader, "is_keras", False)
-		# Pre-compile the graph with XLA once during startup
+        # Pre-compile the graph with XLA once during startup
         # reduce_retracing=True prevents memory leaks from repeated compiles
         self._compiled_predict = tf.function(
             self.model, 
@@ -131,7 +131,7 @@ class InferenceService:
     #     """Keras (.h5) inference pipeline for multispectral numpy arrays."""
     #     original_h, original_w = image_array.shape[:2]
 
-	# 	# Prepare the tensor as we did before
+    # 	# Prepare the tensor as we did before
     #     input_tensor = tf.convert_to_tensor(image_array, dtype=tf.float32)
         
     #     # Resize to 512x512 using TensorFlow (safely handles 4 channels)
@@ -186,7 +186,7 @@ class InferenceService:
             align_corners=False
         )
 
-		# Step 4: Normalization & Distribution Shift
+        # Step 4: Normalization & Distribution Shift
         if tensor.max() <= 255.0:
             # 1. Base normalization to 0.0 - 1.0
             tensor = tensor / 255.0
@@ -219,8 +219,8 @@ class InferenceService:
             
             # ESA 2022 Offset Fix (Removes the +1000 artificial brightness)
             # If the raw max exceeds 10000, it's a post-2022 image with the +1000 shift.
-            if raw_max > 10000.0:
-                tensor = torch.clamp(tensor - 0.1, min=0.0)
+            # if raw_max > 10000.0:
+            tensor = torch.clamp(tensor - 0.1, min=0.0, max=1.0)
 
         # Move to execution device (CPU/GPU)
         tensor = tensor.to(self.device)

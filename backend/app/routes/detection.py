@@ -10,7 +10,7 @@ Orchestrates the complete forest change detection pipeline:
 """
 
 import io
-import os
+import uuid
 import logging
 import numpy as np
 from rasterio.io import MemoryFile
@@ -119,6 +119,7 @@ async def detect_change(
     image_t2: UploadFile = File(...),
     model_name: str = Form("attention_unet"),
 ):
+    task_id = uuid.uuid4().hex[:12]
     # ── 1. Read Bytes ─────────────────────────────────────────────────────────
     t1_bytes = await image_t1.read()
     t2_bytes = await image_t2.read()
@@ -158,16 +159,17 @@ async def detect_change(
     pil_t2 = prep_for_pil(arr_t2)
 
     # ── 5. Save Output Images ─────────────────────────────────────────────────
-    _, change_map_url = save_image(change_pil, "change")
-    _, mask_t1_url    = save_mask_as_image(mask_t1, "mask_t1")
-    _, mask_t2_url    = save_mask_as_image(mask_t2, "mask_t2")
-    _, image_t1_url   = save_image(pil_t1, "input_t1")
-    _, image_t2_url   = save_image(pil_t2, "input_t2")
+    _, change_map_url = save_image(change_pil, "change", task_id)
+    _, mask_t1_url    = save_mask_as_image(mask_t1, "mask_t1", task_id)
+    _, mask_t2_url    = save_mask_as_image(mask_t2, "mask_t2", task_id)
+    _, image_t1_url   = save_image(pil_t1, "input_t1", task_id)
+    _, image_t2_url   = save_image(pil_t2, "input_t2", task_id)
 
     logger.info(f"Change detection complete. Stats: {stats}")
 
     return ChangeDetectionResponse(
         **stats,
+        id=task_id,
         change_map_url=change_map_url,
         mask_t1_url=mask_t1_url,
         mask_t2_url=mask_t2_url,
@@ -186,6 +188,8 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
 
     # Initialize InferenceService with requested model
     inference_service = InferenceService(model_name=query.model_name)
+
+    task_id = uuid.uuid4().hex[:12]
 
     try:
         # 1. Fetch T1 and T2 numpy arrays from AWS Open Data
@@ -213,14 +217,15 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
         stats = compute_statistics(mask_t1, mask_t2)
 
         # 6. Save Output Images
-        _, change_map_url = save_image(change_pil, "change")
-        _, mask_t1_url    = save_mask_as_image(mask_t1, "mask_t1")
-        _, mask_t2_url    = save_mask_as_image(mask_t2, "mask_t2")
-        _, image_t1_url   = save_image(img_t1.convert("RGB"), "input_t1")
-        _, image_t2_url   = save_image(img_t2.convert("RGB"), "input_t2")
+        _, change_map_url = save_image(change_pil, "change", task_id)
+        _, mask_t1_url    = save_mask_as_image(mask_t1, "mask_t1", task_id)
+        _, mask_t2_url    = save_mask_as_image(mask_t2, "mask_t2", task_id)
+        _, image_t1_url   = save_image(img_t1.convert("RGB"), "input_t1", task_id)
+        _, image_t2_url   = save_image(img_t2.convert("RGB"), "input_t2", task_id)
 
         return ChangeDetectionResponse(
             **stats,
+            id=task_id,
             change_map_url=change_map_url,
             mask_t1_url=mask_t1_url,
             mask_t2_url=mask_t2_url,
@@ -241,6 +246,8 @@ async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadF
     Detects forest using ML and snow/water using NDWI physics.
     Plots explicit hybrid masks and enforces strict persistent-snow overlap on the change map.
     """
+    task_id = uuid.uuid4().hex[:12]
+
     # Read & Load Data
     t1_bytes = await image_t1.read()
     t2_bytes = await image_t2.read()
@@ -297,14 +304,15 @@ async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadF
     pil_t1 = prep_for_pil(arr_t1)
     pil_t2 = prep_for_pil(arr_t2)
 
-    _, change_map_url = save_image(hybrid_change_pil, "hybrid_change")
-    _, mask_t1_url    = save_image(Image.fromarray(rgb_hybrid_t1), "hybrid_mask_t1")
-    _, mask_t2_url    = save_image(Image.fromarray(rgb_hybrid_t2), "hybrid_mask_t2")
-    _, image_t1_url   = save_image(Image.fromarray(pil_t1), "input_t1")
-    _, image_t2_url   = save_image(Image.fromarray(pil_t2), "input_t2")
+    _, change_map_url = save_image(hybrid_change_pil, "hybrid_change", task_id)
+    _, mask_t1_url    = save_image(Image.fromarray(rgb_hybrid_t1), "hybrid_mask_t1", task_id)
+    _, mask_t2_url    = save_image(Image.fromarray(rgb_hybrid_t2), "hybrid_mask_t2", task_id)
+    _, image_t1_url   = save_image(Image.fromarray(pil_t1), "input_t1", task_id)
+    _, image_t2_url   = save_image(Image.fromarray(pil_t2), "input_t2", task_id)
 
     return ChangeDetectionResponse(
         **stats,
+        id=task_id,
         change_map_url=change_map_url,
         mask_t1_url=mask_t1_url,
         mask_t2_url=mask_t2_url,

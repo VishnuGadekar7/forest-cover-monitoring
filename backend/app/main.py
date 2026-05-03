@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 import numpy as np
 
 from app.routes.detection import router as detection_router
+from app.routes.export import router as export_router
 from app.services.inference_service import InferenceService
 from app.services.model_loader import ModelLoader
 
@@ -85,6 +86,7 @@ def create_app() -> FastAPI:
 
     # ── Routers ────────────────────────────────────────────────────────────────
     app.include_router(detection_router, prefix="/api/v1", tags=["Change Detection"])
+    app.include_router(export_router, prefix="/api/v1", tags=["Export"])
 
     @app.get("/health", tags=["Health"])
     async def health_check():

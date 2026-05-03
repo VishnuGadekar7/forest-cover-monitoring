@@ -8,6 +8,7 @@ import axios from "axios";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
 export interface ChangeDetectionResult {
+  id: string;
   forest_area_t1: number;
   forest_area_t2: number;
   forest_loss: number;
@@ -80,7 +81,6 @@ export async function detectForestSnow(
   return response.data;
 }
 
-
 export interface STACQueryRequest {
   bbox: [number, number, number, number];
   date_t1: string;
@@ -107,4 +107,23 @@ export async function detectChangeAutomated(
 export function assetUrl(relativePath: string): string {
   const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
   return `${backendBase}${relativePath}`;
+}
+
+/**
+ * GET /api/v1/export-tif
+ * Requests a 16-bit GeoTIFF export for a specific task ID.
+ * Returns a Blob that can be downloaded by the browser.
+ */
+export async function exportChangeMapTif(
+  taskId: string, 
+  epsg: number = 4326
+): Promise<Blob> {
+  const response = await axios.get<Blob>(
+    `${API_BASE}/export-tif`,
+    {
+      params: { task_id: taskId, epsg: epsg },
+      responseType: "blob", // Critical for preventing binary data corruption
+    }
+  );
+  return response.data;
 }

@@ -18,15 +18,15 @@ STATIC_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Image Saving ──────────────────────────────────────────────────────────────
 
-def save_image(img, suffix: str) -> tuple[str, str]:
+def save_image(img, suffix: str, task_id: str) -> tuple[str, str]:
     """
-    Save a PIL image (or numpy array) to the static/change_maps directory.
+    Save a PIL image (or numpy array) to the static/change_maps/<task_id>/<suffix>.png
 
     Accepts either a PIL.Image.Image or a numpy ndarray (H, W, C).
     4-channel arrays (RGBA / RGB+NIR) are converted to RGB before saving.
 
     Returns:
-        (filename, relative_url) — e.g. ("abc123_change.png", "/static/change_maps/abc123_change.png")
+        (filename, relative_url) — e.g. ("change.png", "/static/change_maps/abc123/change.png")
     """
     # Coerce numpy arrays to PIL
     if isinstance(img, np.ndarray):
@@ -37,21 +37,24 @@ def save_image(img, suffix: str) -> tuple[str, str]:
     # Ensure RGB mode (no alpha) for clean PNG output
     if img.mode not in ("RGB", "L"):
         img = img.convert("RGB")
-    base_id = uuid.uuid4().hex[:12]
-    filename = f"{base_id}_{suffix}.png"
-    path = STATIC_DIR / filename
+    # Create the unique folder for this specific prediction
+    task_dir = STATIC_DIR / task_id
+    task_dir.mkdir(parents=True, exist_ok=True)
+    
+    filename = f"{suffix}.png"
+    path = task_dir / filename
     img.save(str(path), format="PNG", optimize=True)
-    return filename, f"/static/change_maps/{filename}"
+    return filename, f"/static/change_maps/{task_id}/{filename}"
 
 
-def save_mask_as_image(mask: np.ndarray, suffix: str) -> tuple[str, str]:
+def save_mask_as_image(mask: np.ndarray, suffix: str, task_id: str) -> tuple[str, str]:
     """
     Convert a binary (0/1) uint8 mask into a greyscale PIL image and save it.
     Forest pixels become white (255), non-forest black (0).
     """
     visual = (mask * 255).astype(np.uint8)
     img = Image.fromarray(visual, mode="L").convert("RGB")
-    return save_image(img, suffix)
+    return save_image(img, suffix, task_id)
 
 
 def generate_mask_overlay(

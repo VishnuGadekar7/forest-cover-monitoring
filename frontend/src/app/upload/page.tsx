@@ -1,8 +1,9 @@
 "use client";
 
-import { act, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, AlertCircle, Loader2, Map, Upload as UploadIcon, Snowflake } from "lucide-react";
+import Link from "next/link";
+import { Zap, AlertCircle, Loader2, Map, Upload as UploadIcon, Snowflake, History } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import UploadCard from "@/components/UploadCard";
 import STACMap from "@/components/STACMap";
@@ -10,9 +11,26 @@ import { detectChange, detectChangeAutomated, detectForestSnow } from "@/lib/api
 import type { ChangeDetectionResult } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Store result in sessionStorage so the results page can read it
-function storeResult(result: ChangeDetectionResult) {
-  sessionStorage.setItem("detection_result", JSON.stringify(result));
+// Store result in localStorage array so we can build a history page
+function storeResult(result: ChangeDetectionResult): string {
+  // Get existing history, or an empty array if it doesn't exist
+  const existingHistory = JSON.parse(localStorage.getItem("prediction_history") || "[]");
+  
+  // Ensure the result has a timestamp
+  const resultToSave = {
+    ...result,
+    timestamp: Date.now()
+  };
+
+  // Add to the front of the array (newest first)
+  existingHistory.unshift(resultToSave);
+
+  // Cap history at 100 items to prevent localStorage overflow
+  const cappedHistory = existingHistory.slice(0, 100);
+  localStorage.setItem("prediction_history", JSON.stringify(cappedHistory));
+
+  // Return the ID so the router knows where to navigate
+  return resultToSave.id; 
 }
 
 export default function UploadPage() {
@@ -34,8 +52,8 @@ export default function UploadPage() {
     setError(null);
     try {
       const result = await detectChange(imageT1, imageT2, selectedModel, setProgress);
-      storeResult(result);
-      router.push("/results");
+      const savedId = storeResult(result);
+      router.push(`/results?id=${savedId}`);
     } catch (err: any) {
       handleApiError(err);
     } finally {
@@ -54,8 +72,8 @@ export default function UploadPage() {
         max_cloud_cover: 20,
         model_name: selectedModel
       });
-      storeResult(result);
-      router.push("/results");
+      const savedId = storeResult(result);
+      router.push(`/results?id=${savedId}`);
     } catch (err: any) {
       handleApiError(err);
     } finally {
@@ -70,8 +88,8 @@ export default function UploadPage() {
     setError(null);
     try {
       const result = await detectForestSnow(imageT1, imageT2, selectedModel, setProgress);
-      storeResult(result);
-      router.push("/results");
+      const savedId = storeResult(result);
+      router.push(`/results?id=${savedId}`);
     } catch (err: any) {
       handleApiError(err);
     } finally {
@@ -175,7 +193,7 @@ export default function UploadPage() {
                 transition={{ duration: 0.3, ease: "easeOut" }}
                 className="glass-card glow-border p-8 mb-8"
               >
-				{activeTab === "snow" && (
+                {activeTab === "snow" && (
                   <div className="mb-6 px-4 py-3 bg-cyan-950/30 border border-cyan-900/50 rounded-xl flex items-start gap-3">
                     <Snowflake className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
                     <p className="text-sm text-cyan-200/80 leading-relaxed">
@@ -235,7 +253,7 @@ export default function UploadPage() {
                       </>
                     ) : (
                       <>
-						{activeTab === "snow" ? <Snowflake className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+                        {activeTab === "snow" ? <Snowflake className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
                         {activeTab === "snow" ? "Detect Forest & Snow" : "Detect Forest Change"}
                       </>
                     )}

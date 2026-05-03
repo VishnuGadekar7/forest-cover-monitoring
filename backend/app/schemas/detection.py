@@ -15,6 +15,9 @@ class ChangeDetectionResponse(BaseModel):
     All area values are in hectares (ha), assuming a 10 m/pixel
     ground sampling distance (Sentinel-2 standard).
     """
+    id: str = Field(
+        ..., description="Result id"
+    )
     forest_area_t1: float = Field(
         ..., description="Forest area in T1 image (hectares)"
     )
@@ -49,6 +52,7 @@ class ChangeDetectionResponse(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
+                "id": "abc123",
                 "forest_area_t1": 1245.6,
                 "forest_area_t2": 1102.3,
                 "forest_loss": 183.4,
