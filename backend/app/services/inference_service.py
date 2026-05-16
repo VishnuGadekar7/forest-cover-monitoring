@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from typing import Union
 
 from app.services.model_loader import ModelLoader
-from app.utils.image_preprocessing import preprocess, postprocess_mask
+#from app.utils.image_preprocessing import preprocess, postprocess_mask
 
 
 class InferenceService:
@@ -178,13 +178,14 @@ class InferenceService:
         # Step 2: Add batch dimension -> (1, 4, H, W)
         tensor = tensor.unsqueeze(0)
 
-        # Step 3: Resize to 512x512
-        tensor = F.interpolate(
-            tensor, 
-            size=(512, 512), 
-            mode='bilinear', 
-            align_corners=False
-        )
+		# Step 3: Resize to 512x512 ONLY if necessary (Saves CPU time)
+        if original_h != 512 or original_w != 512:
+            tensor = F.interpolate(
+                tensor, 
+                size=(512, 512), 
+                mode='bilinear', 
+                align_corners=False
+            )
 
         # Step 4: Normalization & Distribution Shift
         if tensor.max() <= 255.0:
@@ -212,7 +213,7 @@ class InferenceService:
             # 4. Re-stack the tensor with the synthesized NIR band
             tensor = torch.cat([red, green, blue, fake_nir], dim=-3)
         else:
-            raw_max = tensor.max()
+            # raw_max = tensor.max()
 
             # Base Sentinel-2 Normalization (Clip glare to 10000)
             tensor = torch.clamp(tensor, min=0.0, max=10000.0) / 10000.0
@@ -232,15 +233,16 @@ class InferenceService:
         # Apply Sigmoid to convert logits to probabilities [0, 1]
         probs = torch.sigmoid(raw_logits)
 
-        # Resize the probability map back to the original image dimensions
-        probs_resized = F.interpolate(
-            probs, 
-            size=(original_h, original_w), 
-            mode='nearest'
-        )
+		# Resize back ONLY if necessary
+        if original_h != 512 or original_w != 512:
+            probs = F.interpolate(
+                probs, 
+                size=(original_h, original_w), 
+                mode='nearest'
+            )
 
         # Apply threshold and convert to binary mask {0, 1}
-        binary_mask = (probs_resized > self.threshold).byte()
+        binary_mask = (probs > self.threshold).byte()
 
         # Move back to CPU, strip the batch/channel dimensions, and convert to numpy
         mask_np = binary_mask.squeeze().cpu().numpy()

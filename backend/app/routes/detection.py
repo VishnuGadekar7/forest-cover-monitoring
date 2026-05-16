@@ -10,15 +10,19 @@ Orchestrates the complete forest change detection pipeline:
 """
 
 import io
+import os
 import uuid
+import shutil, tempfile
 import logging
 import numpy as np
+import rasterio
 from rasterio.io import MemoryFile
 from fastapi import APIRouter, File, UploadFile, HTTPException, status, Form
 from PIL import Image
 
 from app.schemas.detection import ChangeDetectionResponse
 from app.schemas.stac_query import STACQueryRequest
+from app.services.tiling import split_array_into_tiles, stitch_mask_tiles, stream_tiles_from_disk
 from app.services.inference_service import InferenceService
 from app.services.change_detection import generate_change_map, change_map_to_pil
 from app.services.stac_service import STACService
@@ -66,15 +70,31 @@ def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
             raise ValueError(f"Failed to read standard image: {e}")
 
 def prep_for_pil(arr: np.ndarray) -> np.ndarray:
-    """Prepares a 16-bit or float array for 8-bit PIL Image rendering."""
+    """
+    Prepares a 16-bit or float array for 8-bit PIL Image rendering, optimized for memory.
+    """
     if arr.dtype != np.uint8:
-        v_max = np.percentile(arr, 98)
+        # Drop the 4th channel (NIR) if it exists. PIL only needs RGB (3 channels).
+        if arr.shape[-1] >= 4:
+            arr_rgb = arr[..., :3]
+        else:
+            arr_rgb = arr
+
+        # Force the array to float32 BEFORE doing math to prevent 64-bit RAM spikes.
+        arr_f32 = arr_rgb.astype(np.float32)
+
+        v_max = np.percentile(arr_f32, 98)
         if v_max == 0:
-            v_max = arr.max() if arr.max() > 0 else 1
-        normalized = np.clip(arr / v_max, 0.0, 1.0)
+            v_max = arr_f32.max() if arr_f32.max() > 0 else 1.0
+
+        normalized = np.clip(arr_f32 / v_max, 0.0, 1.0)
         gamma = 1.2 
         brightened = np.power(normalized, 1.0 / gamma)
         return (brightened * 255.0).astype(np.uint8)
+
+    # If already uint8, just ensure it is RGB
+    if arr.shape[-1] >= 4:
+        return arr[..., :3]
     return arr
 
 def compute_ndwi_mask(arr: np.ndarray) -> np.ndarray:
@@ -109,6 +129,51 @@ def create_hybrid_rgb_map(forest_mask: np.ndarray, snow_mask: np.ndarray) -> np.
     
     return rgb
 
+def process_upload(upload_file: UploadFile, inference: InferenceService) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Handles memory-safe sliding window inference for an uploaded file.
+    Returns: (predicted_mask, original_array)
+    """
+    filename = (upload_file.filename or "unknown.jpg").lower()
+    
+    if filename.endswith((".tif", ".tiff")):
+        # Disk Streaming for massive GeoTIFFs
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".tif") as tmp:
+            shutil.copyfileobj(upload_file.file, tmp)
+            tmp_path = tmp.name
+
+        try:
+            # Stream inference directly from disk
+            tile_stream = stream_tiles_from_disk(tmp_path, tile_size=512)
+            predicted_tiles = []
+            for spec, tile in tile_stream:
+                predicted_tiles.append((spec, inference.predict(tile)))
+
+            # Read the full array into RAM once for visualization/NDWI (uint16 ~900MB max)
+            with rasterio.open(tmp_path) as src:
+                arr = np.transpose(src.read(), (1, 2, 0))
+            
+            h, w = arr.shape[:2]
+            mask = stitch_mask_tiles(predicted_tiles, (h, w))
+            return mask, arr
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+    else:
+        # Standard in-memory processing for JPG/PNG
+        upload_file.file.seek(0)
+        file_bytes = upload_file.file.read()
+        arr = load_image_to_numpy(file_bytes, filename)
+        
+        # Use in-memory generator
+        tiles_gen = split_array_into_tiles(arr, tile_size=512)
+        predicted_tiles = []
+        for spec, tile in tiles_gen:
+            predicted_tiles.append((spec, inference.predict(tile)))
+
+        h, w = arr.shape[:2]
+        mask = stitch_mask_tiles(predicted_tiles, (h, w))
+        return mask, arr
 
 @router.post(
     "/detect-change",
@@ -120,29 +185,15 @@ async def detect_change(
     model_name: str = Form("attention_unet"),
 ):
     task_id = uuid.uuid4().hex[:12]
-    # ── 1. Read Bytes ─────────────────────────────────────────────────────────
-    t1_bytes = await image_t1.read()
-    t2_bytes = await image_t2.read()
-
-    # ── 2. Load Arrays (Handles both TIF and JPG/PNG dynamically) ─────────────
     try:
-        arr_t1 = load_image_to_numpy(t1_bytes, image_t1.filename or "unknown.jpg")
-        arr_t2 = load_image_to_numpy(t2_bytes, image_t2.filename or "unknown.jpg")
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        )
-
-    # ── 3. Inference — pass numpy arrays ──────────────────────────────────────
-    try:
-        # Initialize InferenceService with requested model
         inference = InferenceService(model_name=model_name)
         
-        logger.info(f"Running inference on T1 using {model_name}...")
-        mask_t1 = inference.predict(arr_t1)
-        logger.info(f"Running inference on T2 using {model_name}...")
-        mask_t2 = inference.predict(arr_t2)
+        logger.info(f"Processing T1 with {model_name}...")
+        mask_t1, arr_t1 = process_upload(image_t1, inference)
+        
+        logger.info(f"Processing T2 with {model_name}...")
+        mask_t2, arr_t2 = process_upload(image_t2, inference)
+        
     except Exception as exc:
         logger.exception("Inference failed")
         raise HTTPException(
@@ -187,7 +238,7 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
     logger.info(f"Received automated STAC request for BBox: {query.bbox}, Model: {query.model_name}")
 
     # Initialize InferenceService with requested model
-    inference_service = InferenceService(model_name=query.model_name)
+    inference = InferenceService(model_name=query.model_name)
 
     task_id = uuid.uuid4().hex[:12]
 
@@ -205,23 +256,33 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
         img_t1 = Image.fromarray(arr_t1).resize(TARGET_SIZE, Image.BILINEAR)
         img_t2 = Image.fromarray(arr_t2).resize(TARGET_SIZE, Image.BILINEAR)
 
-        # 3. Predict masks
-        mask_t1 = inference_service.predict(img_t1)
-        mask_t2 = inference_service.predict(img_t2)
+        # Predict masks using the memory generator
+        tiles_t1 = split_array_into_tiles(arr_t1, tile_size=512)
+        pred_t1 = [(spec, inference.predict(tile)) for spec, tile in tiles_t1]
+        (h, w) = arr_t1.shape[:2]
+        mask_t1 = stitch_mask_tiles(pred_t1, (h, w))
 
-        # 4. Change Detection
+        tiles_t2 = split_array_into_tiles(arr_t2, tile_size=512)
+        pred_t2 = [(spec, inference.predict(tile)) for spec, tile in tiles_t2]
+        (h, w) = arr_t2.shape[:2]
+        mask_t2 = stitch_mask_tiles(pred_t2, (h, w))
+
+        # Change Detection
         change_rgb, _ = generate_change_map(mask_t1, mask_t2)
         change_pil = change_map_to_pil(change_rgb)
 
         # 5. Compute Statistics
         stats = compute_statistics(mask_t1, mask_t2)
 
+        pil_t1 = prep_for_pil(arr_t1)
+        pil_t2 = prep_for_pil(arr_t2)
+
         # 6. Save Output Images
         _, change_map_url = save_image(change_pil, "change", task_id)
         _, mask_t1_url    = save_mask_as_image(mask_t1, "mask_t1", task_id)
         _, mask_t2_url    = save_mask_as_image(mask_t2, "mask_t2", task_id)
-        _, image_t1_url   = save_image(img_t1.convert("RGB"), "input_t1", task_id)
-        _, image_t2_url   = save_image(img_t2.convert("RGB"), "input_t2", task_id)
+        _, image_t1_url   = save_image(Image.fromarray(pil_t1), "input_t1", task_id)
+        _, image_t2_url   = save_image(Image.fromarray(pil_t2), "input_t2", task_id)
 
         return ChangeDetectionResponse(
             **stats,
@@ -249,24 +310,14 @@ async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadF
     task_id = uuid.uuid4().hex[:12]
 
     # Read & Load Data
-    t1_bytes = await image_t1.read()
-    t2_bytes = await image_t2.read()
-    
     try:
-        arr_t1 = load_image_to_numpy(t1_bytes, image_t1.filename or "unknown.tif")
-        arr_t2 = load_image_to_numpy(t2_bytes, image_t2.filename or "unknown.tif")
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-    # Inference: ML Forest & Physics Snow
-    try:
-        # Initialize InferenceService with requested model
         inference = InferenceService(model_name=model_name)
         
-        logger.info(f"Running inference on T1 using {model_name}...")
-        mask_forest_t1 = inference.predict(arr_t1)
-        logger.info(f"Running inference on T2 using {model_name}...")
-        mask_forest_t2 = inference.predict(arr_t2)
+        logger.info(f"Processing T1 with {model_name}...")
+        mask_forest_t1, arr_t1 = process_upload(image_t1, inference)
+        
+        logger.info(f"Processing T2 with {model_name}...")
+        mask_forest_t2, arr_t2 = process_upload(image_t2, inference)
     except Exception as exc:
         logger.exception("Inference failed")
         raise HTTPException(
