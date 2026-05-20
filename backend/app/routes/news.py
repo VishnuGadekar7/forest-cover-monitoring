@@ -46,7 +46,8 @@ async def get_news():
 
     print("Fetching live forest news...")
 
-    generate_real_time_incidents()
+    if not os.path.exists(LIVE_JSON):
+        generate_real_time_incidents()
 
     if not os.path.exists(LIVE_JSON):
         return []
@@ -70,7 +71,8 @@ async def get_historic_news():
 
     print("Generating historic incidents...")
 
-    generate_historic_incidents()
+    if not os.path.exists(HISTORIC_JSON):
+        generate_historic_incidents()
 
     if not os.path.exists(HISTORIC_JSON):
         return []

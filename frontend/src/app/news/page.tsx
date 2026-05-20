@@ -8,20 +8,41 @@ export default function NewsPage() {
 
   const [liveNews, setLiveNews] = useState<any[]>([]);
   const [historicNews, setHistoricNews] = useState<any[]>([]);
-
+  const [loading, setLoading] = useState(false);
   // =====================================================
   // FETCH LIVE NEWS
   // =====================================================
 
     useEffect(() => {
 
-    fetch("http://127.0.0.1:8000/news")
+      const cachedNews = localStorage.getItem("liveNews");
+
+      if (cachedNews) {
+
+        setLiveNews(JSON.parse(cachedNews));
+
+        return;
+      }
+
+      setLoading(true);
+
+      fetch("http://127.0.0.1:8000/news")
+
         .then((res) => res.json())
+
         .then((data) => {
-        console.log("LIVE NEWS:", data);
-        setLiveNews(data);
+
+          setLiveNews(data);
+
+          localStorage.setItem(
+            "liveNews",
+            JSON.stringify(data)
+          );
         })
-        .catch((err) => console.error(err));
+
+        .catch(console.error)
+
+        .finally(() => setLoading(false));
 
     }, []);
 
@@ -31,15 +52,32 @@ export default function NewsPage() {
 
   useEffect(() => {
 
-  fetch("http://127.0.0.1:8000/historic-news")
-    .then((res) => res.json())
-    .then((data) => {
-      console.log("HISTORIC NEWS:", data);
-      setHistoricNews(data);
-    })
-    .catch((err) => console.error(err));
+    const cachedHistoric = localStorage.getItem("historicNews");
 
-}, []);
+    if (cachedHistoric) {
+
+      setHistoricNews(JSON.parse(cachedHistoric));
+
+      return;
+    }
+
+    fetch("http://127.0.0.1:8000/historic-news")
+
+      .then((res) => res.json())
+
+      .then((data) => {
+
+        setHistoricNews(data);
+
+        localStorage.setItem(
+          "historicNews",
+          JSON.stringify(data)
+        );
+      })
+
+      .catch(console.error);
+
+  }, []);
 
   // =====================================================
   // SELECT DATA BASED ON TAB
