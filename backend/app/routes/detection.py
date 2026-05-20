@@ -33,8 +33,54 @@ from app.utils.visualization import save_image, save_mask_as_image, generate_mas
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Maximum allowable pixels for real-time CPU processing
+# 50,000,000 pixels is roughly a 7000x7000 boundary (~350 patches total for T1 + T2)
+MAX_PIXEL_LIMIT = 50_000_000
+
 # Singleton for STAC service
 _stac_service = STACService()
+
+def validate_image_dimensions_safe(upload_file: UploadFile) -> None:
+    """
+    Inspects structural metadata headers without loading heavy pixel arrays into RAM.
+    Raises an HTTP 413 Exception immediately if the file is too heavy for CPU inference.
+    """
+    filename = (upload_file.filename or "unknown.jpg").lower()
+    
+    if filename.endswith((".tif", ".tiff")):
+        try:
+            # Seek to zero to read structural metadata headers cleanly
+            upload_file.file.seek(0)
+            with rasterio.open(upload_file.file) as src:
+                h, w = src.height, src.width
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid GeoTIFF structural metadata: {e}"
+            )
+    else:
+        try:
+            upload_file.file.seek(0)
+            # PIL Image.open() reads ONLY the metadata header—it does not load pixels yet
+            with Image.open(upload_file.file) as img:
+                w, h = img.size
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid standard image layout header: {e}"
+            )
+            
+    total_pixels = h * w
+    if total_pixels > MAX_PIXEL_LIMIT:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                "Image is too large! Please crop your image or upload a smaller file (under 7,000 x 7,000 pixels) to process it quickly."
+            )
+        )
+        
+    # Crucial: Reset file pointer to 0 so subsequent streaming functions can read the data from the start
+    upload_file.file.seek(0)
 
 def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
     """
@@ -184,6 +230,8 @@ async def detect_change(
     image_t2: UploadFile = File(...),
     model_name: str = Form("attention_unet"),
 ):
+    validate_image_dimensions_safe(image_t1)
+    validate_image_dimensions_safe(image_t2)
     task_id = uuid.uuid4().hex[:12]
     try:
         inference = InferenceService(model_name=model_name)
@@ -250,11 +298,20 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
 
         logger.info(f"Fetched arrays using MGRS {mgrs_id}: T1 {arr_t1.shape}, T2 {arr_t2.shape}")
 
+        h_t1, w_t1 = arr_t1.shape[:2]
+        h_t2, w_t2 = arr_t2.shape[:2]
+        
+        if (h_t1 * w_t1) > MAX_PIXEL_LIMIT or (h_t2 * w_t2) > MAX_PIXEL_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Selected area is too large! Please select a smaller bounding box to process the satellite data quickly."
+            )
+
         # 2. Convert raw arrays to PIL Images for the InferenceService
-        from app.utils.image_preprocessing import TARGET_SIZE
-        # Use RGBA mode to preserve 4 bands (RGB + NIR) during resize
-        img_t1 = Image.fromarray(arr_t1).resize(TARGET_SIZE, Image.BILINEAR)
-        img_t2 = Image.fromarray(arr_t2).resize(TARGET_SIZE, Image.BILINEAR)
+        # from app.utils.image_preprocessing import TARGET_SIZE
+        # # Use RGBA mode to preserve 4 bands (RGB + NIR) during resize
+        # img_t1 = Image.fromarray(arr_t1).resize(TARGET_SIZE, Image.BILINEAR)
+        # img_t2 = Image.fromarray(arr_t2).resize(TARGET_SIZE, Image.BILINEAR)
 
         # Predict masks using the memory generator
         tiles_t1 = split_array_into_tiles(arr_t1, tile_size=512)
@@ -307,6 +364,9 @@ async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadF
     Detects forest using ML and snow/water using NDWI physics.
     Plots explicit hybrid masks and enforces strict persistent-snow overlap on the change map.
     """
+    validate_image_dimensions_safe(image_t1)
+    validate_image_dimensions_safe(image_t2)
+
     task_id = uuid.uuid4().hex[:12]
 
     # Read & Load Data
