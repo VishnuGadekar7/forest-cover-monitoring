@@ -13,14 +13,17 @@ export default function NewsPage() {
   // FETCH LIVE NEWS
   // =====================================================
 
-  useEffect(() => {
+    useEffect(() => {
 
     fetch("http://127.0.0.1:8000/news")
-      .then((res) => res.json())
-      .then((data) => setLiveNews(data))
-      .catch((err) => console.log(err));
+        .then((res) => res.json())
+        .then((data) => {
+        console.log("LIVE NEWS:", data);
+        setLiveNews(data);
+        })
+        .catch((err) => console.error(err));
 
-  }, []);
+    }, []);
 
   // =====================================================
   // FETCH HISTORIC NEWS
@@ -28,12 +31,15 @@ export default function NewsPage() {
 
   useEffect(() => {
 
-    fetch("http://127.0.0.1:8000/historic-news")
-      .then((res) => res.json())
-      .then((data) => setHistoricNews(data))
-      .catch((err) => console.log(err));
+  fetch("http://127.0.0.1:8000/historic-news")
+    .then((res) => res.json())
+    .then((data) => {
+      console.log("HISTORIC NEWS:", data);
+      setHistoricNews(data);
+    })
+    .catch((err) => console.error(err));
 
-  }, []);
+}, []);
 
   // =====================================================
   // SELECT DATA BASED ON TAB
