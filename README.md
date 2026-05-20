@@ -139,7 +139,63 @@ Switch model via env: `set MODEL_NAME=resnet_unet`
 }
 ```
 
+# Live Forest Incident Monitoring
+
+The platform now includes a real-time forest incident intelligence module powered by live environmental news feeds and Earth Observation workflows.
+
+## Features
+
+- Real-time forest incident monitoring
+- NLP-based wildfire and deforestation detection
+- India-focused environmental news filtering
+- Automatic geocoding of incident locations
+- Historic EO analysis using Sentinel-2 imagery
+- Before/After satellite visualization (T1/T2)
+- NDVI-based vegetation change analysis
+- Interactive monitoring dashboard
+
 ---
+
+## Live News Pipeline
+
+The backend continuously fetches and filters environmental incidents from:
+
+- Google News RSS
+- GNews API
+
+The pipeline performs:
+
+1. Forest-related keyword filtering
+2. India-region filtering
+3. Duplicate removal
+4. NLP-based incident classification
+5. Location extraction and geocoding
+6. Coordinate generation for EO analysis
+
+Generated incidents are stored in:
+
+```bash
+backend/static/news_data/incidents.json
+
+News Monitoring API
+GET /news
+
+Returns latest live forest incidents.
+
+Example response:
+
+[
+  {
+    "title": "Forest Fire in Uttarakhand",
+    "incident_type": "WILDFIRE",
+    "location": ["Uttarakhand"],
+    "coordinates": {
+      "lat": 30.0668,
+      "lon": 79.0193
+    },
+    "date": "2026-05-19"
+  }
+]
 
 ## Future Roadmap
 
