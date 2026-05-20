@@ -42,16 +42,20 @@ _stac_service = STACService()
 
 def validate_image_dimensions_safe(upload_file: UploadFile) -> None:
     """
-    Inspects structural metadata headers without loading heavy pixel arrays into RAM.
-    Raises an HTTP 413 Exception immediately if the file is too heavy for CPU inference.
+    Inspects structural metadata headers without causing out-of-memory issues.
+    Safely resolves GDAL CPLE_OpenFailedError by using a bounded 4MB memory buffer.
     """
     filename = (upload_file.filename or "unknown.jpg").lower()
     
     if filename.endswith((".tif", ".tiff")):
         try:
-            # Seek to zero to read structural metadata headers cleanly
+            # Reset file reader location
             upload_file.file.seek(0)
-            with rasterio.open(upload_file.file) as src:
+            
+            # Read a strict maximum of 4MB. 
+            file_bytes = upload_file.file.read(1024 * 1024 * 4) 
+            
+            with rasterio.open(io.BytesIO(file_bytes)) as src:
                 h, w = src.height, src.width
         except Exception as e:
             raise HTTPException(
@@ -61,7 +65,6 @@ def validate_image_dimensions_safe(upload_file: UploadFile) -> None:
     else:
         try:
             upload_file.file.seek(0)
-            # PIL Image.open() reads ONLY the metadata header—it does not load pixels yet
             with Image.open(upload_file.file) as img:
                 w, h = img.size
         except Exception as e:
@@ -74,12 +77,10 @@ def validate_image_dimensions_safe(upload_file: UploadFile) -> None:
     if total_pixels > MAX_PIXEL_LIMIT:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                "Image is too large! Please crop your image or upload a smaller file (under 7,000 x 7,000 pixels) to process it quickly."
-            )
+            detail="Image is too large! Please crop your image or upload a smaller file (under 7,000 x 7,000 pixels) to process it quickly."
         )
         
-    # Crucial: Reset file pointer to 0 so subsequent streaming functions can read the data from the start
+    # CRITICAL: Reset file pointer so downstream processing blocks can stream cleanly
     upload_file.file.seek(0)
 
 def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
