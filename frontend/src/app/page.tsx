@@ -1,9 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, Leaf, Shield, Cpu, Map } from "lucide-react";
+import { ArrowRight, Leaf, Shield, Cpu, Map, History } from "lucide-react";
+import { useEffect, useState } from "react";
 
 export default function LandingPage() {
+	const [hasHistory, setHasHistory] = useState(false);
+
+  useEffect(() => {
+    // Safely check local storage after the component mounts on the client
+    const saved = localStorage.getItem("prediction_history");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        // Only show the button if it's an array and has at least one item
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setHasHistory(true);
+        }
+      } catch (error) {
+        console.error("Failed to parse prediction history:", error);
+      }
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-[#0a0f1a] overflow-hidden flex flex-col">
       {/* ── Background Effects ── */}
@@ -23,12 +42,25 @@ export default function LandingPage() {
             <span className="text-[10px] text-slate-500 tracking-widest uppercase">Deep Learning · EO</span>
           </div>
         </div>
-        <Link
-          href="/upload"
-          className="text-sm font-medium text-slate-300 hover:text-white transition-colors"
-        >
-          Launch App
-        </Link>
+
+        <div className="flex items-center gap-6">
+          {/* CONDITIONALLY RENDERED HISTORY BUTTON */}
+          {hasHistory && (
+            <Link
+              href="/history"
+              className="flex items-center gap-1.5 text-sm font-medium text-slate-400 hover:text-slate-200 transition-colors animate-in fade-in duration-500"
+            >
+              <History className="w-4 h-4" />
+              Recent Analyses
+            </Link>
+          )}
+          <Link
+            href="/upload"
+            className="text-sm font-medium text-slate-300 hover:text-white transition-colors"
+          >
+            Launch App
+          </Link>
+        </div>
       </nav>
 
       {/* ── Hero Section ── */}

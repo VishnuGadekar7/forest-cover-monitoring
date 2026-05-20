@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 import numpy as np
 
 from app.routes.detection import router as detection_router
+from app.routes.export import router as export_router
 from app.routes.news import router as news_router
 from app.services.inference_service import InferenceService
 from app.routes.historic import router as historic_router
@@ -57,12 +58,14 @@ def create_app() -> FastAPI:
 
     static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
     os.makedirs(static_dir, exist_ok=True)
-
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-    app.include_router(detection_router, prefix="/api/v1")
+    # ── Routers ────────────────────────────────────────────────────────────────
+    app.include_router(detection_router, prefix="/api/v1", tags=["Change Detection"])
+    app.include_router(export_router, prefix="/api/v1", tags=["Export"])
     app.include_router(news_router)
     app.include_router(historic_router)
+    
     @app.get("/health")
     async def health_check():
         return {"status": "ok"}

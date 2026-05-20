@@ -8,6 +8,7 @@ import axios from "axios";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
 export interface ChangeDetectionResult {
+  id: string;
   forest_area_t1: number;
   forest_area_t2: number;
   forest_loss: number;
@@ -50,6 +51,36 @@ export async function detectChange(
   return response.data;
 }
 
+/**
+ * POST /api/v1/detect-forest-snow
+ * Sends the two image files and returns the full detection result.
+ */
+export async function detectForestSnow(
+  imageT1: File,
+  imageT2: File,
+  modelName: string = "attention_unet",
+  onProgress?: (pct: number) => void
+): Promise<ChangeDetectionResult> {
+  const form = new FormData();
+  form.append("image_t1", imageT1);
+  form.append("image_t2", imageT2);
+  form.append("model_name", modelName);
+
+  const response = await axios.post<ChangeDetectionResult>(
+    `${API_BASE}/detect-forest-snow`,
+    form,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) {
+          onProgress(Math.round((e.loaded * 100) / e.total));
+        }
+      },
+    }
+  );
+  return response.data;
+}
+
 export interface STACQueryRequest {
   bbox: [number, number, number, number];
   date_t1: string;
@@ -76,4 +107,23 @@ export async function detectChangeAutomated(
 export function assetUrl(relativePath: string): string {
   const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
   return `${backendBase}${relativePath}`;
+}
+
+/**
+ * GET /api/v1/export-tif
+ * Requests a 16-bit GeoTIFF export for a specific task ID.
+ * Returns a Blob that can be downloaded by the browser.
+ */
+export async function exportChangeMapTif(
+  taskId: string, 
+  epsg: number = 4326
+): Promise<Blob> {
+  const response = await axios.get<Blob>(
+    `${API_BASE}/export-tif`,
+    {
+      params: { task_id: taskId, epsg: epsg },
+      responseType: "blob", // Critical for preventing binary data corruption
+    }
+  );
+  return response.data;
 }

@@ -2,23 +2,40 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Zap, AlertCircle, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Zap, AlertCircle, Loader2, Map, Upload as UploadIcon, Snowflake, History } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import UploadCard from "@/components/UploadCard";
 import STACMap from "@/components/STACMap";
-import { detectChange, detectChangeAutomated } from "@/lib/api";
+import { detectChange, detectChangeAutomated, detectForestSnow } from "@/lib/api";
 import type { ChangeDetectionResult } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
-import { Map, Upload as UploadIcon } from "lucide-react";
 
-// Store result in sessionStorage so the results page can read it
-function storeResult(result: ChangeDetectionResult) {
-  sessionStorage.setItem("detection_result", JSON.stringify(result));
+// Store result in localStorage array so we can build a history page
+function storeResult(result: ChangeDetectionResult): string {
+  // Get existing history, or an empty array if it doesn't exist
+  const existingHistory = JSON.parse(localStorage.getItem("prediction_history") || "[]");
+  
+  // Ensure the result has a timestamp
+  const resultToSave = {
+    ...result,
+    timestamp: Date.now()
+  };
+
+  // Add to the front of the array (newest first)
+  existingHistory.unshift(resultToSave);
+
+  // Cap history at 100 items to prevent localStorage overflow
+  const cappedHistory = existingHistory.slice(0, 100);
+  localStorage.setItem("prediction_history", JSON.stringify(cappedHistory));
+
+  // Return the ID so the router knows where to navigate
+  return resultToSave.id; 
 }
 
 export default function UploadPage() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"manual" | "automated">("manual");
+  const [activeTab, setActiveTab] = useState<"manual" | "automated" | "snow">("manual");
   const [imageT1, setImageT1] = useState<File | null>(null);
   const [imageT2, setImageT2] = useState<File | null>(null);
   const [selectedModel, setSelectedModel] = useState("attention_unet");
@@ -35,8 +52,8 @@ export default function UploadPage() {
     setError(null);
     try {
       const result = await detectChange(imageT1, imageT2, selectedModel, setProgress);
-      storeResult(result);
-      router.push("/results");
+      const savedId = storeResult(result);
+      router.push(`/results?id=${savedId}`);
     } catch (err: any) {
       handleApiError(err);
     } finally {
@@ -55,8 +72,24 @@ export default function UploadPage() {
         max_cloud_cover: 20,
         model_name: selectedModel
       });
-      storeResult(result);
-      router.push("/results");
+      const savedId = storeResult(result);
+      router.push(`/results?id=${savedId}`);
+    } catch (err: any) {
+      handleApiError(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSnowDetect = async () => {
+    if (!imageT1 || !imageT2) return;
+    setLoading(true);
+    setProgress(0);
+    setError(null);
+    try {
+      const result = await detectForestSnow(imageT1, imageT2, selectedModel, setProgress);
+      const savedId = storeResult(result);
+      router.push(`/results?id=${savedId}`);
     } catch (err: any) {
       handleApiError(err);
     } finally {
@@ -98,8 +131,8 @@ export default function UploadPage() {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex justify-center mb-10">
-          <div className="bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800/50 flex items-center gap-1.5 backdrop-blur-md">
+        <div className="flex justify-center mb-10 overflow-x-auto pb-4">
+          <div className="bg-slate-900/50 p-1.5 rounded-2xl border border-slate-800/50 flex items-center gap-1.5 backdrop-blur-md min-w-max">
             <button
               onClick={() => setActiveTab("manual")}
               className={`flex items-center gap-2.5 px-7 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === "manual" ? "bg-slate-800 text-white shadow-lg ring-1 ring-slate-700/50" : "text-slate-500 hover:text-slate-300"}`}
@@ -113,6 +146,13 @@ export default function UploadPage() {
             >
               <Map className="w-4 h-4" />
               Automated Ingestion
+            </button>
+            <button
+              onClick={() => setActiveTab("snow")}
+              className={`flex items-center gap-2.5 px-7 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 ${activeTab === "snow" ? "bg-slate-800 text-white shadow-lg ring-1 ring-slate-700/50" : "text-slate-500 hover:text-slate-300"}`}
+            >
+              <Snowflake className="w-4 h-4" />
+              Forest + Snow
             </button>
           </div>
         </div>
@@ -144,15 +184,24 @@ export default function UploadPage() {
         {/* Dynamic Content */}
         <div className="relative">
           <AnimatePresence mode="wait">
-            {activeTab === "manual" ? (
+            {(activeTab === "manual" || activeTab === "snow") ? (
               <motion.div
-                key="manual"
+                key={activeTab}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3, ease: "easeOut" }}
                 className="glass-card glow-border p-8 mb-8"
               >
+                {activeTab === "snow" && (
+                  <div className="mb-6 px-4 py-3 bg-cyan-950/30 border border-cyan-900/50 rounded-xl flex items-start gap-3">
+                    <Snowflake className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+                    <p className="text-sm text-cyan-200/80 leading-relaxed">
+                      <strong>Hybrid Mode:</strong> This analysis will segment forest cover using the ML model while simultaneously calculating NDWI to map persistent snow and water bodies across both time periods.
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid md:grid-cols-2 gap-8">
                   <UploadCard
                     label="Time Period 1 (Earlier)"
@@ -190,7 +239,7 @@ export default function UploadPage() {
                 <div className="mt-10 flex justify-center">
                   <button
                     id="detect-button"
-                    onClick={handleDetect}
+                    onClick={activeTab === "snow" ? handleSnowDetect : handleDetect}
                     disabled={!canDetect}
                     className={`relative flex items-center gap-3 px-12 py-4 rounded-2xl font-bold text-base transition-all duration-300 ${canDetect
                       ? "bg-gradient-to-r from-green-600 to-blue-600 hover:from-green-500 hover:to-blue-500 text-white shadow-xl shadow-green-900/30 hover:shadow-green-900/50 hover:scale-[1.03] active:scale-95"
@@ -204,8 +253,8 @@ export default function UploadPage() {
                       </>
                     ) : (
                       <>
-                        <Zap className="w-5 h-5" />
-                        Detect Forest Change
+                        {activeTab === "snow" ? <Snowflake className="w-5 h-5" /> : <Zap className="w-5 h-5" />}
+                        {activeTab === "snow" ? "Detect Forest & Snow" : "Detect Forest Change"}
                       </>
                     )}
                   </button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Search, Calendar, Map as MapIcon, Loader2, Target } from "lucide-react";
+import { Search, Calendar, Map as MapIcon, Loader2, Target, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface STACMapProps {
@@ -9,12 +9,32 @@ interface STACMapProps {
   loading: boolean;
 }
 
+// Enforce strict pixel limit
+const MAX_PIXEL_LIMIT = 50_000_000; 
+
+// Helper function to calculate distance between coordinates in meters using Haversine
+function getDistanceMeters(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // Earth's radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
 export default function STACMap({ onQuery, loading }: STACMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<any>(null);
   const [bbox, setBbox] = useState<[number, number, number, number] | null>(null);
-  const [dateT1, setDateT1] = useState("2021-01-01/2021-12-31");
-  const [dateT2, setDateT2] = useState("2023-01-01/2023-12-31");
+  const [isTooLarge, setIsTooLarge] = useState(false);
+  const [dateT1, setDateT1] = useState("2025-01-01/2025-01-31");
+  const [dateT2, setDateT2] = useState("2026-01-01/2026-01-31");
 
   useEffect(() => {
     if (!mapRef.current) return;
@@ -35,8 +55,8 @@ export default function STACMap({ onQuery, loading }: STACMapProps) {
         if ((mapRef.current as any)._leaflet_id) return;
 
         const map = leaflet.map(mapRef.current!, {
-          center: [-9.0, -63.0], // Default to Amazon area (popular for forest change)
-          zoom: 10,
+          center: [22.0, 78.0], // Default map center to India
+          zoom: 5,
           zoomControl: false,
         });
 
@@ -84,6 +104,24 @@ export default function STACMap({ onQuery, loading }: STACMapProps) {
               map.removeLayer(l);
             }
           });
+
+		      // Pixel distance calculations
+    		  const widthMeters = getDistanceMeters(south, west, south, east);
+          const heightMeters = getDistanceMeters(south, west, north, west);
+          
+          // Sentinel-2 has a spatial resolution of 10 meters per pixel
+          const pixelWidth = widthMeters / 10;
+          const pixelHeight = heightMeters / 10;
+          const totalEstimatedPixels = pixelWidth * pixelHeight;
+
+          if (totalEstimatedPixels > MAX_PIXEL_LIMIT) {
+            setIsTooLarge(true);
+            // Change the rectangle color to red dynamically to indicate validation failure
+            layer.setStyle({ color: '#ef4444', fillColor: '#ef4444' });
+          } else {
+            setIsTooLarge(false);
+            layer.setStyle({ color: '#22c55e', fillColor: '#22c55e' });
+          }
 
           setBbox([west, south, east, north]);
         });
@@ -138,25 +176,33 @@ export default function STACMap({ onQuery, loading }: STACMapProps) {
         </div>
 
         {/* Action Button */}
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {bbox && (
             <motion.div
               initial={{ opacity: 0, y: 10, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 10, scale: 0.95 }}
             >
-              <button
-                onClick={() => onQuery(bbox, dateT1, dateT2)}
-                disabled={loading}
-                className="w-full group relative flex items-center justify-center gap-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-xl shadow-green-900/40 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:scale-100"
-              >
-                {loading ? (
+              {isTooLarge ? (
+                // Over-Limit UI Layout State
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-[11px] text-red-400 flex items-start gap-3 shadow-2xl backdrop-blur-md">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>Selected area is too large! Please zoom in or select a smaller bounding box.</span>
+                </div>
+              ) : (
+                <button
+                  onClick={() => onQuery(bbox, dateT1, dateT2)}
+                  disabled={loading}
+                  className="w-full group relative flex items-center justify-center gap-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white py-3.5 rounded-xl font-bold text-sm shadow-xl shadow-green-900/40 transition-all hover:scale-[1.02] disabled:opacity-50 disabled:scale-100"
+                >
+                  {loading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
+                  ) : (
                   <Target className="w-4 h-4 group-hover:scale-125 transition-transform" />
-                )}
-                Fetch & Analyze Area
-              </button>
+                  )}
+                  Fetch & Analyze Area
+                </button>
+              )}
               <p className="text-[10px] text-center text-slate-400 mt-2">
                 Coordinates: {bbox[0].toFixed(3)}, {bbox[1].toFixed(3)} to {bbox[2].toFixed(3)}, {bbox[3].toFixed(3)}
               </p>

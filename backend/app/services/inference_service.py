@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from typing import Union
 
 from app.services.model_loader import ModelLoader
-from app.utils.image_preprocessing import preprocess, postprocess_mask
+#from app.utils.image_preprocessing import preprocess, postprocess_mask
 
 
 class InferenceService:
@@ -39,7 +39,7 @@ class InferenceService:
         self.model = loader.model
         self.device = loader.device
         self.is_keras = getattr(loader, "is_keras", False)
-		# Pre-compile the graph with XLA once during startup
+        # Pre-compile the graph with XLA once during startup
         # reduce_retracing=True prevents memory leaks from repeated compiles
         self._compiled_predict = tf.function(
             self.model, 
@@ -131,7 +131,7 @@ class InferenceService:
     #     """Keras (.h5) inference pipeline for multispectral numpy arrays."""
     #     original_h, original_w = image_array.shape[:2]
 
-	# 	# Prepare the tensor as we did before
+    # 	# Prepare the tensor as we did before
     #     input_tensor = tf.convert_to_tensor(image_array, dtype=tf.float32)
         
     #     # Resize to 512x512 using TensorFlow (safely handles 4 channels)
@@ -178,15 +178,16 @@ class InferenceService:
         # Step 2: Add batch dimension -> (1, 4, H, W)
         tensor = tensor.unsqueeze(0)
 
-        # Step 3: Resize to 512x512
-        tensor = F.interpolate(
-            tensor, 
-            size=(512, 512), 
-            mode='bilinear', 
-            align_corners=False
-        )
+		# Step 3: Resize to 512x512 ONLY if necessary (Saves CPU time)
+        if original_h != 512 or original_w != 512:
+            tensor = F.interpolate(
+                tensor, 
+                size=(512, 512), 
+                mode='bilinear', 
+                align_corners=False
+            )
 
-		# Step 4: Normalization & Distribution Shift
+        # Step 4: Normalization & Distribution Shift
         if tensor.max() <= 255.0:
             # 1. Base normalization to 0.0 - 1.0
             tensor = tensor / 255.0
@@ -212,15 +213,15 @@ class InferenceService:
             # 4. Re-stack the tensor with the synthesized NIR band
             tensor = torch.cat([red, green, blue, fake_nir], dim=-3)
         else:
-            raw_max = tensor.max()
+            # raw_max = tensor.max()
 
             # Base Sentinel-2 Normalization (Clip glare to 10000)
             tensor = torch.clamp(tensor, min=0.0, max=10000.0) / 10000.0
             
             # ESA 2022 Offset Fix (Removes the +1000 artificial brightness)
             # If the raw max exceeds 10000, it's a post-2022 image with the +1000 shift.
-            if raw_max > 10000.0:
-                tensor = torch.clamp(tensor - 0.1, min=0.0)
+            # if raw_max > 10000.0:
+            tensor = torch.clamp(tensor - 0.1, min=0.0, max=1.0)
 
         # Move to execution device (CPU/GPU)
         tensor = tensor.to(self.device)
@@ -232,15 +233,16 @@ class InferenceService:
         # Apply Sigmoid to convert logits to probabilities [0, 1]
         probs = torch.sigmoid(raw_logits)
 
-        # Resize the probability map back to the original image dimensions
-        probs_resized = F.interpolate(
-            probs, 
-            size=(original_h, original_w), 
-            mode='nearest'
-        )
+		# Resize back ONLY if necessary
+        if original_h != 512 or original_w != 512:
+            probs = F.interpolate(
+                probs, 
+                size=(original_h, original_w), 
+                mode='nearest'
+            )
 
         # Apply threshold and convert to binary mask {0, 1}
-        binary_mask = (probs_resized > self.threshold).byte()
+        binary_mask = (probs > self.threshold).byte()
 
         # Move back to CPU, strip the batch/channel dimensions, and convert to numpy
         mask_np = binary_mask.squeeze().cpu().numpy()
