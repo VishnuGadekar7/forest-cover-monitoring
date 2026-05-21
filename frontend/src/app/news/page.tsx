@@ -10,41 +10,67 @@ export default function NewsPage() {
   const [historicNews, setHistoricNews] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   // =====================================================
-  // FETCH LIVE NEWS
-  // =====================================================
+// FETCH LIVE NEWS
+// =====================================================
 
-    useEffect(() => {
+const CACHE_DURATION = 1000 * 60 * 60 * 6;
+// 6 hours
 
-      const cachedNews = localStorage.getItem("liveNews");
+useEffect(() => {
 
-      if (cachedNews) {
+  const cached = localStorage.getItem("liveNews");
 
-        setLiveNews(JSON.parse(cachedNews));
+  if (cached) {
 
-        return;
-      }
+    const parsed = JSON.parse(cached);
 
-      setLoading(true);
+    const now = Date.now();
 
-      fetch("http://127.0.0.1:8000/news")
+    // USE CACHE IF NOT EXPIRED
+    if (
+      now - parsed.timestamp
+      < CACHE_DURATION
+    ) {
 
-        .then((res) => res.json())
+      console.log("Using cached live news");
 
-        .then((data) => {
+      setLiveNews(parsed.data);
 
-          setLiveNews(data);
+      return;
+    }
+  }
 
-          localStorage.setItem(
-            "liveNews",
-            JSON.stringify(data)
-          );
+  console.log("Fetching fresh live news");
+
+  setLoading(true);
+
+  fetch("http://127.0.0.1:8000/news")
+
+    .then((res) => res.json())
+
+    .then((data) => {
+
+      setLiveNews(data);
+
+      localStorage.setItem(
+
+        "liveNews",
+
+        JSON.stringify({
+
+          data: data,
+
+          timestamp: Date.now()
+
         })
+      );
+    })
 
-        .catch(console.error)
+    .catch(console.error)
 
-        .finally(() => setLoading(false));
+    .finally(() => setLoading(false));
 
-    }, []);
+}, []);
 
   // =====================================================
   // FETCH HISTORIC NEWS

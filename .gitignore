@@ -30,3 +30,5 @@ backend/static/change_maps
 backend/app/weights/*.h5
 backend/app/weights/*.pth
 backend/scripts
+backend/static/historic_images/
+backend/static/news_data/
