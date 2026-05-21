@@ -37,10 +37,10 @@ class STACService:
         items.sort(key=lambda x: x.properties.get("eo:cloud_cover", 100))
         return items[0]
 
-    def fetch_tile_array(self, bbox: list[float], date_range: str, max_cloud_cover: int = 10, preferred_mgrs: str = None) -> tuple[np.ndarray, str]:
+    def fetch_tile_array(self, bbox: list[float], date_range: str, max_cloud_cover: int = 10, preferred_mgrs: str = None) -> tuple[np.ndarray, str, str, tuple[float, float, float, float]]:
         """
         Query the STAC catalog and stream 4 bands (R, G, B, NIR) for the given bounding box.
-        Returns (array, mgrs_tile_id)
+        Returns (array, mgrs_tile_id, crs_string, transformed_bbox)
         """
         best_item = self.search_best_item(bbox, date_range, max_cloud_cover, preferred_mgrs)
         
@@ -59,6 +59,8 @@ class STACService:
 
         band_arrays = []
         target_shape = None
+        crs_string = None
+        transformed_bbox = None
         
         logger.info(f"Streaming {required_bands} bands from AWS S3...")
         
@@ -68,10 +70,16 @@ class STACService:
             try:
                 with rasterio.open(sample_href) as sample_src:
                     src_crs = sample_src.crs
+
+                    if src_crs.to_epsg():
+                        crs_string = f"EPSG:{src_crs.to_epsg()}"
+                    else:
+                        crs_string = src_crs.to_wkt()
+                    
                     transformed_bbox = transform_bounds('EPSG:4326', src_crs, *bbox)
                     window = from_bounds(*transformed_bbox, sample_src.transform)
                     
-                    logger.info(f"STAC Item {best_item.id} - CRS: {src_crs}, BBox: {transformed_bbox}, Window: {window}")
+                    logger.info(f"STAC Item {best_item.id} - CRS: {crs_string}, BBox: {transformed_bbox}, Window: {window}")
                     
                     # Fetch all 4 bands using the same window
                     for band_name in required_bands:
@@ -105,4 +113,4 @@ class STACService:
         arr = np.stack(band_arrays, axis=0) # (4, H, W)
         arr = np.transpose(arr, (1, 2, 0)) # (H, W, 4)
         
-        return arr, mgrs_id
+        return arr, mgrs_id, crs_string, transformed_bbox

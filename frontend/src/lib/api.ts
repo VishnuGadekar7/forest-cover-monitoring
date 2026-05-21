@@ -115,13 +115,12 @@ export function assetUrl(relativePath: string): string {
  * Returns a Blob that can be downloaded by the browser.
  */
 export async function exportChangeMapTif(
-  taskId: string, 
-  epsg: number = 4326
+  taskId: string
 ): Promise<Blob> {
   const response = await axios.get<Blob>(
     `${API_BASE}/export-tif`,
     {
-      params: { task_id: taskId, epsg: epsg },
+      params: { task_id: taskId },
       responseType: "blob", // Critical for preventing binary data corruption
     }
   );

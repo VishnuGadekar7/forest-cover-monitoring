@@ -58,7 +58,7 @@ export default function ResultsClient() {
     } else {
       // TIF Download: Hit the backend API to generate the GeoTIFF
       try {
-        const blob = await exportChangeMapTif(result.id, 4326);
+        const blob = await exportChangeMapTif(result.id);
         
         // Create a temporary object URL to trigger the browser download
         const url = window.URL.createObjectURL(blob);
@@ -150,18 +150,20 @@ export default function ResultsClient() {
               {/* Locked Geospatial Options */}
               <div className="bg-slate-900/50 rounded-lg p-4 border border-slate-800 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-300">Coordinate Reference System</span>
-                  <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">EPSG:4326</span>
-                </div>
-                <div className="flex items-center justify-between">
                   <span className="text-sm text-slate-300">Resolution</span>
                   <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">Original Dimensions</span>
                 </div>
                 {downloadFormat === "tif" && (
-                  <div className="flex items-center justify-between animate-in fade-in slide-in-from-top-2">
-                    <span className="text-sm text-slate-300">Data Type</span>
-                    <span className="text-xs font-mono bg-blue-900/30 text-blue-400 border border-blue-800 px-2 py-1 rounded">16-bit Integer</span>
-                  </div>
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-slate-300">Coordinate Reference System</span>
+                      <span className="text-xs font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">Original CRS</span>
+                    </div>
+                    <div className="flex items-center justify-between animate-in fade-in slide-in-from-top-2">
+                      <span className="text-sm text-slate-300">Data Type</span>
+                      <span className="text-xs font-mono bg-blue-900/30 text-blue-400 border border-blue-800 px-2 py-1 rounded">8-bit Integer (uint8)</span>
+                    </div>
+                  </>
                 )}
               </div>
 

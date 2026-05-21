@@ -12,11 +12,14 @@ Orchestrates the complete forest change detection pipeline:
 import io
 import os
 import uuid
+import json
 import shutil, tempfile
 import logging
 import numpy as np
 import rasterio
 from rasterio.io import MemoryFile
+import rasterio.errors
+import rasterio.transform
 from fastapi import APIRouter, File, UploadFile, HTTPException, status, Form
 from PIL import Image
 
@@ -40,48 +43,101 @@ MAX_PIXEL_LIMIT = 50_000_000
 # Singleton for STAC service
 _stac_service = STACService()
 
-def validate_image_dimensions_safe(upload_file: UploadFile) -> None:
+def validate_image_dimensions_safe(image_t1: UploadFile, image_t2: UploadFile, task_id: str) -> None:
     """
-    Inspects structural metadata headers without causing out-of-memory issues.
-    Safely resolves GDAL CPLE_OpenFailedError by using a bounded 4MB memory buffer.
+    Unified pre-flight validation gate for manual uploads:
+      1. Inspects image headers within a bounded 4MB RAM footprint.
+      2. Enforces system-wide processing pixel limits.
+      3. Verifies that T1 and T2 share identical spatial pixel shapes.
+      4. Captures spatial referencing coordinate matrices (preferring T1's CRS profile)
+         and saves it as a lightweight JSON sidecar tracking asset.
     """
-    filename = (upload_file.filename or "unknown.jpg").lower()
-    
-    if filename.endswith((".tif", ".tiff")):
-        try:
-            # Reset file reader location
-            upload_file.file.seek(0)
-            
-            # Read a strict maximum of 4MB. 
-            file_bytes = upload_file.file.read(1024 * 1024 * 4) 
-            
-            with rasterio.open(io.BytesIO(file_bytes)) as src:
-                h, w = src.height, src.width
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid GeoTIFF structural metadata: {e}"
-            )
-    else:
-        try:
-            upload_file.file.seek(0)
-            with Image.open(upload_file.file) as img:
-                w, h = img.size
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid standard image layout header: {e}"
-            )
-            
-    total_pixels = h * w
-    if total_pixels > MAX_PIXEL_LIMIT:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="Image is too large! Please crop your image or upload a smaller file (under 7,000 x 7,000 pixels) to process it quickly."
-        )
+    dimensions = []
+    spatial_meta = {"crs_wkt": None, "transform": []}
+
+    # Iterate over both files sequentially to run structural checks
+    for idx, upload_file in enumerate([image_t1, image_t2]):
+        filename = (upload_file.filename or "unknown.jpg").lower()
         
-    # CRITICAL: Reset file pointer so downstream processing blocks can stream cleanly
-    upload_file.file.seek(0)
+        if filename.endswith((".tif", ".tiff")):
+            h, w = None, None
+            # Try reading 4MB first, fail-over to 16MB if headers sit deeper
+            for chunk_size in [1024 * 1024 * 4, 1024 * 1024 * 16]:
+                try:
+                    upload_file.file.seek(0)
+                    file_bytes = upload_file.file.read(chunk_size)
+                    
+                    with rasterio.open(io.BytesIO(file_bytes)) as src:
+                        h, w = src.height, src.width
+                        
+                        # Extract spatial profiles natively once open succeeds
+                        if idx == 0:
+                            spatial_meta["crs_wkt"] = src.crs.to_wkt() if src.crs else None
+                            spatial_meta["transform"] = list(src.transform)[:6]
+                        elif idx == 1 and not spatial_meta["crs_wkt"] and src.crs:
+                            spatial_meta["crs_wkt"] = src.crs.to_wkt()
+                            spatial_meta["transform"] = list(src.transform)[:6]
+                    
+                    # If rasterio opened the memory block successfully without crashing, break the chunk loop
+                    break
+                except (rasterio.errors.RasterioIOError, Exception) as e:
+                    # If we already tried the maximum 16MB window and still failed, raise the error
+                    if chunk_size == 1024 * 1024 * 16:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Invalid GeoTIFF structural metadata in {upload_file.filename}: {e}"
+                        )
+                    # Otherwise, log a warning and let it fall through to try the larger 16MB chunk
+                    logger.warning(f"IFD offset missing in initial 4MB chunk for {upload_file.filename}. Retrying with 16MB...")
+                    continue
+        else:
+            try:
+                upload_file.file.seek(0)
+                with Image.open(upload_file.file) as img:
+                    w, h = img.size
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid standard image layout header in {upload_file.filename}: {e}"
+                )
+                
+        # Enforce maximum compute thresholds individually
+        total_pixels = h * w
+        if total_pixels > MAX_PIXEL_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="Image is too large! Please crop your image or upload a smaller file (under 7,000 x 7,000 pixels) to process it quickly."
+            )
+            
+        dimensions.append((w, h))
+        upload_file.file.seek(0)  # Always reset stream pointer safely
+
+    # Strict shape alignment validation
+    (w1, h1), (w2, h2) = dimensions[0], dimensions[1]
+    if w1 != w2 or h1 != h2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Dimension mismatch! Baseline image T1 is {w1}x{h1}, but analysis image T2 is {w2}x{h2}. Images must share identical pixel dimensions."
+        )
+
+    # If neither file had geospatial tags, initialize an identity matrix default profile
+    if not spatial_meta["transform"]:
+        spatial_meta["transform"] = list(rasterio.transform.Affine.identity())[:6]
+
+    spatial_meta["width"] = w1
+    spatial_meta["height"] = h1
+
+    try:
+        meta_folder = "static/metadata"
+        os.makedirs(meta_folder, exist_ok=True)
+        meta_path = os.path.join(meta_folder, f"{task_id}.json")
+        
+        # Write CRS metadata to JSON file
+        with open(meta_path, "w") as f:
+            json.dump(spatial_meta, f, indent=2)
+        logger.info(f"Successfully cached spatial coordinate anchors to {meta_path}")
+    except Exception as e:
+        logger.error(f"Failed to write spatial metadata tracking asset: {e}")
 
 def load_image_to_numpy(file_bytes: bytes, filename: str) -> np.ndarray:
     """
@@ -231,9 +287,10 @@ async def detect_change(
     image_t2: UploadFile = File(...),
     model_name: str = Form("attention_unet"),
 ):
-    validate_image_dimensions_safe(image_t1)
-    validate_image_dimensions_safe(image_t2)
     task_id = uuid.uuid4().hex[:12]
+
+    validate_image_dimensions_safe(image_t1, image_t2, task_id)
+
     try:
         inference = InferenceService(model_name=model_name)
         
@@ -250,7 +307,7 @@ async def detect_change(
             detail=f"Inference error using {model_name}: {exc}"
         )
 
-    # ── 4. Change Detection & Stats ───────────────────────────────────────────
+    # --- Change Detection & Stats ---
     change_rgb, _ = generate_change_map(mask_t1, mask_t2)
     change_pil    = change_map_to_pil(change_rgb)
     stats = compute_statistics(mask_t1, mask_t2)
@@ -258,7 +315,7 @@ async def detect_change(
     pil_t1 = prep_for_pil(arr_t1)
     pil_t2 = prep_for_pil(arr_t2)
 
-    # ── 5. Save Output Images ─────────────────────────────────────────────────
+    # --- Save Output Images ---
     _, change_map_url = save_image(change_pil, "change", task_id)
     _, mask_t1_url    = save_mask_as_image(mask_t1, "mask_t1", task_id)
     _, mask_t2_url    = save_mask_as_image(mask_t2, "mask_t2", task_id)
@@ -292,10 +349,10 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
     task_id = uuid.uuid4().hex[:12]
 
     try:
-        # 1. Fetch T1 and T2 numpy arrays from AWS Open Data
+        # Fetch T1 and T2 numpy arrays from AWS Open Data
         # Ensure we use the SAME MGRS tile for both to avoid geographic displacement
-        arr_t1, mgrs_id = _stac_service.fetch_tile_array(query.bbox, query.date_t1, query.max_cloud_cover)
-        arr_t2, _       = _stac_service.fetch_tile_array(query.bbox, query.date_t2, query.max_cloud_cover, preferred_mgrs=mgrs_id)
+        arr_t1, mgrs_id, crs_identity, utm_bounds = _stac_service.fetch_tile_array(query.bbox, query.date_t1, query.max_cloud_cover)
+        arr_t2, _, _, _ = _stac_service.fetch_tile_array(query.bbox, query.date_t2, query.max_cloud_cover, preferred_mgrs=mgrs_id)
 
         logger.info(f"Fetched arrays using MGRS {mgrs_id}: T1 {arr_t1.shape}, T2 {arr_t2.shape}")
 
@@ -308,22 +365,37 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
                 detail="Selected area is too large! Please select a smaller bounding box to process the satellite data quickly."
             )
 
-        # 2. Convert raw arrays to PIL Images for the InferenceService
-        # from app.utils.image_preprocessing import TARGET_SIZE
-        # # Use RGBA mode to preserve 4 bands (RGB + NIR) during resize
-        # img_t1 = Image.fromarray(arr_t1).resize(TARGET_SIZE, Image.BILINEAR)
-        # img_t2 = Image.fromarray(arr_t2).resize(TARGET_SIZE, Image.BILINEAR)
-
+        # CAPTURE & SAVE STAC GEOSPATIAL METADATA SIDE-CAR DOCUMENT
+        try:
+            # Use the UTM bounding boxes to compute a precise affine pixel mapping scale
+            u_west, u_south, u_east, u_north = utm_bounds
+            transform = rasterio.transform.from_bounds(u_west, u_south, u_east, u_north, w_t1, h_t1)
+            
+            spatial_meta = {
+                "crs_wkt": crs_identity,     # Maps to the true native target projection (EPSG:32643)
+                "transform": list(transform)[:6],
+                "width": w_t1,
+                "height": h_t1
+            }
+            
+            meta_folder = "static/metadata"
+            os.makedirs(meta_folder, exist_ok=True)
+            meta_path = os.path.join(meta_folder, f"{task_id}.json")
+            
+            with open(meta_path, "w") as f:
+                json.dump(spatial_meta, f, indent=2)
+            logger.info(f"Successfully cached automated planar metadata matrix to {meta_path}")
+        except Exception as meta_err:
+            logger.error(f"Failed to record automated tracking file info: {meta_err}")
+        
         # Predict masks using the memory generator
         tiles_t1 = split_array_into_tiles(arr_t1, tile_size=512)
         pred_t1 = [(spec, inference.predict(tile)) for spec, tile in tiles_t1]
-        (h, w) = arr_t1.shape[:2]
-        mask_t1 = stitch_mask_tiles(pred_t1, (h, w))
+        mask_t1 = stitch_mask_tiles(pred_t1, (h_t1, w_t1))
 
         tiles_t2 = split_array_into_tiles(arr_t2, tile_size=512)
         pred_t2 = [(spec, inference.predict(tile)) for spec, tile in tiles_t2]
-        (h, w) = arr_t2.shape[:2]
-        mask_t2 = stitch_mask_tiles(pred_t2, (h, w))
+        mask_t2 = stitch_mask_tiles(pred_t2, (h_t2, w_t2))
 
         # Change Detection
         change_rgb, _ = generate_change_map(mask_t1, mask_t2)
@@ -351,9 +423,11 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
             image_t1_url=image_t1_url,
             image_t2_url=image_t2_url,
         )
+    except HTTPException as http_exc:
+        raise http_exc # Re-raise explicit HTTP exceptions directly
     except Exception as e:
         logger.exception("Error during automated STAC change detection: %s", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 @router.post(
     "/detect-forest-snow",
@@ -365,10 +439,9 @@ async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadF
     Detects forest using ML and snow/water using NDWI physics.
     Plots explicit hybrid masks and enforces strict persistent-snow overlap on the change map.
     """
-    validate_image_dimensions_safe(image_t1)
-    validate_image_dimensions_safe(image_t2)
-
     task_id = uuid.uuid4().hex[:12]
+
+    validate_image_dimensions_safe(image_t1, image_t2, task_id)
 
     # Read & Load Data
     try:
