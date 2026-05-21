@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, Calendar, Map as MapIcon, Loader2, Target, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import "./map.css";
 
 interface STACMapProps {
   onQuery: (bbox: [number, number, number, number], dateT1: string, dateT2: string) => void;

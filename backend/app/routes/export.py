@@ -80,8 +80,13 @@ async def export_tif(
         transform_target = Affine.identity()
 
         if spatial_meta:
-            if spatial_meta.get("crs_wkt"):
-                crs_target = rasterio.crs.CRS.from_wkt(spatial_meta["crs_wkt"])
+            crs_wkt_val = spatial_meta.get("crs_wkt")
+            if crs_wkt_val:
+                crs_wkt_str = str(crs_wkt_val).strip()
+                if crs_wkt_str.upper().startswith("EPSG:"):
+                    crs_target = rasterio.crs.CRS.from_string(crs_wkt_str)
+                else:
+                    crs_target = rasterio.crs.CRS.from_wkt(crs_wkt_str)
             
             if spatial_meta.get("transform"):
                 transform_target = Affine(*spatial_meta["transform"])
