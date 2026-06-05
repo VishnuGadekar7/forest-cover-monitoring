@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 from fastapi import APIRouter
 
@@ -38,15 +39,38 @@ HISTORIC_JSON = os.path.join(
 )
 
 # =====================================================
+# CACHE SETTINGS
+# =====================================================
+
+CACHE_DURATION = 60 * 60 * 6
+# 6 hours
+
+# =====================================================
 # LIVE NEWS ROUTE
 # =====================================================
 
 @router.get("/news")
 async def get_news():
 
-    print("Fetching live forest news...")
+    print("Checking live forest news cache...")
 
-    if not os.path.exists(LIVE_JSON):
+    should_refresh = True
+
+    if os.path.exists(LIVE_JSON):
+
+        modified_time = os.path.getmtime(LIVE_JSON)
+
+        current_time = time.time()
+
+        age = current_time - modified_time
+
+        if age < CACHE_DURATION:
+            should_refresh = False
+
+    if should_refresh:
+
+        print("Refreshing live news...")
+
         generate_real_time_incidents()
 
     if not os.path.exists(LIVE_JSON):
@@ -72,6 +96,7 @@ async def get_historic_news():
     print("Generating historic incidents...")
 
     if not os.path.exists(HISTORIC_JSON):
+
         generate_historic_incidents()
 
     if not os.path.exists(HISTORIC_JSON):
