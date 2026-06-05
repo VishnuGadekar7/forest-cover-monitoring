@@ -75,13 +75,13 @@ Dashboard → [http://localhost:3000](http://localhost:3000)
 
 ## Model Weights
 
-Place pretrained `.pth` state-dict files in `backend/weights/`:
+Place pretrained weight files in `backend/weights/`:
 
 | Filename                  | Architecture     | Notes                        |
 |---------------------------|------------------|------------------------------|
-| `attention_unet.pth`      | Attention U-Net  | Default at startup           |
+| `attention_unet_best.h5`  | Attention U-Net  | Default at startup           |
 | `resnet_unet.pth`         | ResNet-34 U-Net  | Requires `smp` library       |
-| `transnet.pth`            | TransNet (ViT)   | Input must be 512×512        |
+| `trans_unet.pth`          | Trans U-Net (MiT-B1)| Input must be 512×512     |
 
 Switch model via env: `set MODEL_NAME=resnet_unet`
 
