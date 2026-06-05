@@ -6,8 +6,8 @@ aiofiles==23.2.1
 
 # ─── Data Science & ML ────────────────────────────────────────────────────────
 torch==2.2.2
-# torchvision==0.17.2
-# # tensorflow==2.16.1
+torchvision==0.17.2
+tensorflow==2.17.0
 numpy==1.26.4
 Pillow==10.3.0
 opencv-python==4.9.0.80
@@ -18,14 +18,14 @@ segmentation-models-pytorch==0.3.3
 timm
 
 # ─── Geospatial Stack (requires GDAL system binaries — use conda or pip from wheel)
-rasterio==1.3.9
+rasterio==1.5.0
 # geopandas==0.14.3
 # shapely==2.0.4
 # pyproj==3.6.1
 boto3
 
 # --- STAC Integration ---
-pystac-client==0.7.6
+pystac-client==0.9.0
 
 # ─── Validation & Utilities ───────────────────────────────────────────────────
 pydantic==2.6.4
