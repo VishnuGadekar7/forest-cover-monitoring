@@ -170,46 +170,6 @@ Example response:
     "date": "2026-05-19"
   }
 ]
-
-## Project Structure
-
-```
-forest-monitoring/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                      # FastAPI app entry point
-│   │   ├── routes/detection.py          # POST /api/v1/detect-change
-│   │   ├── services/
-│   │   │   ├── model_loader.py          # Singleton model loading
-│   │   │   ├── inference_service.py     # Forward pass → binary mask
-│   │   │   └── change_detection.py      # Pixel-wise comparison + colour map
-│   │   ├── models/
-│   │   │   ├── attention_unet.py        # Attention U-Net architecture
-│   │   │   ├── resnet_unet.py           # ResNet-34 U-Net (via smp)
-│   │   │   └── transnet.py              # Transformer-based segmentation
-│   │   ├── utils/
-│   │   │   ├── image_preprocessing.py   # Resize, normalise, tensor conversion
-│   │   │   ├── metrics.py               # Area (ha) + change statistics
-│   │   │   └── visualization.py         # Save PNGs to static dir
-│   │   └── schemas/detection.py         # Pydantic response schema
-│   ├── weights/                         # ← Place your .pth files here
-│   ├── static/change_maps/              # Generated output images
-│   └── requirements.txt
-│
-├── frontend/
-│   └── src/
-│       ├── app/
-│       │   ├── upload/page.tsx          # Image upload UI
-│       │   └── results/page.tsx         # Results dashboard
-│       ├── components/
-│       │   ├── Navbar.tsx
-│       │   ├── UploadCard.tsx           # Drag-and-drop uploader
-│       │   ├── StatCard.tsx             # Stat display cards
-│       │   ├── ForestChart.tsx          # Recharts visualisations
-│       │   └── ChangeMap.tsx            # Leaflet map overlay
-│       └── lib/api.ts                   # Typed API client (axios)
-│
-└── README.md
 ```
 
 ---
