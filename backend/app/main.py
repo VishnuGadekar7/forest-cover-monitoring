@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+		max_age=86400,
     )
 
     static_dir = os.path.join(os.path.dirname(__file__), "..", "static")

@@ -1,3 +1,3 @@
 #!/bin/sh
 . .venv\Scripts\activate
-uvicorn app.main:app --port 8000 --host 0.0.0.0
+uvicorn app.main:app --port 8000 --timeout-keep-alive 600

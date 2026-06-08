@@ -8,6 +8,31 @@ class STACQueryRequest(BaseModel):
     max_cloud_cover: int = Field(10, description="Maximum cloud cover percentage")
     model_name: str = Field("attention_unet", description="Model architecture to use (attention_unet, resnet_unet, transnet)")
 
+    contrast_stretch: bool = Field(
+        default=True, 
+        description="Enable image-wide radiometric contrast stretching."
+    )
+    percentile_2_98: bool = Field(
+        default=True, 
+        description="Use 2%-98% boundary indices for stretching to ignore outliers."
+    )
+    esa_offset_fix: bool = Field(
+        default=False, 
+        description="Apply the -0.1 baseline offset subtraction for post-2022 ESA Sentinel-2 data."
+    )
+    enable_ndvi_veto: bool = Field(
+        default=True, 
+        description="Toggle the NDVI vegetation signature safety filter."
+    )
+    ndvi_threshold: float = Field(
+        default=0.25, 
+        description="Dynamic threshold for the NDVI filter (e.g., 0.25 for standard, 0.45 for strict)."
+    )
+    band_order: str = Field(
+        default="RGBN", 
+        description="The multi-spectral layer sequence of the target sensor (e.g., 'RGBN', 'NRGB')."
+    )
+
     model_config = {
         "protected_namespaces": ()
     }

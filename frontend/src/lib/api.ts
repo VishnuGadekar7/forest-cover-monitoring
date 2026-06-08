@@ -3,6 +3,7 @@
  * Base URL from env (defaults to local dev backend).
  */
 
+import { InferenceSettings } from "@/components/AdvancedSettings";
 import axios from "axios";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
@@ -29,12 +30,21 @@ export async function detectChange(
   imageT1: File,
   imageT2: File,
   modelName: string = "attention_unet",
+  settings: InferenceSettings,
   onProgress?: (pct: number) => void
 ): Promise<ChangeDetectionResult> {
   const form = new FormData();
   form.append("image_t1", imageT1);
   form.append("image_t2", imageT2);
   form.append("model_name", modelName);
+
+  // Pass the settings to the backend
+  form.append("contrast_stretch", settings.contrast_stretch.toString());
+  form.append("percentile_2_98", settings.percentile_2_98.toString());
+  form.append("esa_offset_fix", settings.esa_offset_fix.toString());
+  form.append("enable_ndvi_veto", settings.enable_ndvi_veto.toString());
+  form.append("ndvi_threshold", settings.ndvi_threshold.toString());
+  form.append("band_order", settings.band_order);
 
   const response = await axios.post<ChangeDetectionResult>(
     `${API_BASE}/detect-change`,
@@ -59,12 +69,21 @@ export async function detectForestSnow(
   imageT1: File,
   imageT2: File,
   modelName: string = "attention_unet",
+  settings: InferenceSettings,
   onProgress?: (pct: number) => void
 ): Promise<ChangeDetectionResult> {
   const form = new FormData();
   form.append("image_t1", imageT1);
   form.append("image_t2", imageT2);
   form.append("model_name", modelName);
+
+    // Pass the settings to the backend
+  form.append("contrast_stretch", settings.contrast_stretch.toString());
+  form.append("percentile_2_98", settings.percentile_2_98.toString());
+  form.append("esa_offset_fix", settings.esa_offset_fix.toString());
+  form.append("enable_ndvi_veto", settings.enable_ndvi_veto.toString());
+  form.append("ndvi_threshold", settings.ndvi_threshold.toString());
+  form.append("band_order", settings.band_order);
 
   const response = await axios.post<ChangeDetectionResult>(
     `${API_BASE}/detect-forest-snow`,
@@ -87,6 +106,12 @@ export interface STACQueryRequest {
   date_t2: string;
   max_cloud_cover?: number;
   model_name?: string;
+  contrast_stretch?: boolean;
+  percentile_2_98?: boolean;
+  esa_offset_fix?: boolean;
+  enable_ndvi_veto?: boolean;
+  ndvi_threshold?: number;
+  band_order?: string;
 }
 
 /**

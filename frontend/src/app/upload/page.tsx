@@ -7,6 +7,7 @@ import { Zap, AlertCircle, Loader2, Map, Upload as UploadIcon, Snowflake, Histor
 import Navbar from "@/components/Navbar";
 import UploadCard from "@/components/UploadCard";
 import STACMap from "@/components/STACMap";
+import AdvancedSettings, { InferenceSettings, defaultSettings } from "@/components/AdvancedSettings";
 import { detectChange, detectChangeAutomated, detectForestSnow } from "@/lib/api";
 import type { ChangeDetectionResult } from "@/lib/api";
 import { motion, AnimatePresence } from "framer-motion";
@@ -39,6 +40,7 @@ export default function UploadPage() {
   const [imageT1, setImageT1] = useState<File | null>(null);
   const [imageT2, setImageT2] = useState<File | null>(null);
   const [selectedModel, setSelectedModel] = useState("attention_unet");
+  const [settings, setSettings] = useState<InferenceSettings>(defaultSettings);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -51,7 +53,8 @@ export default function UploadPage() {
     setProgress(0);
     setError(null);
     try {
-      const result = await detectChange(imageT1, imageT2, selectedModel, setProgress);
+      // Pass settings to the API wrapper
+      const result = await detectChange(imageT1, imageT2, selectedModel, settings, setProgress);
       const savedId = storeResult(result);
       router.push(`/results?id=${savedId}`);
     } catch (err: any) {
@@ -65,12 +68,14 @@ export default function UploadPage() {
     setLoading(true);
     setError(null);
     try {
+      // Spread settings into the STAC query payload
       const result = await detectChangeAutomated({
         bbox,
         date_t1: dateT1,
         date_t2: dateT2,
         max_cloud_cover: 20,
-        model_name: selectedModel
+        model_name: selectedModel,
+		...settings
       });
       const savedId = storeResult(result);
       router.push(`/results?id=${savedId}`);
@@ -87,7 +92,8 @@ export default function UploadPage() {
     setProgress(0);
     setError(null);
     try {
-      const result = await detectForestSnow(imageT1, imageT2, selectedModel, setProgress);
+      // Pass settings to the API wrapper
+      const result = await detectForestSnow(imageT1, imageT2, selectedModel, settings, setProgress);
       const savedId = storeResult(result);
       router.push(`/results?id=${savedId}`);
     } catch (err: any) {
@@ -157,27 +163,33 @@ export default function UploadPage() {
           </div>
         </div>
 
-        {/* Global Model Selection */}
-        <div className="max-w-xl mx-auto mb-10">
-          <div className="glass-card glow-border p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
-                <Zap className="w-4 h-4 text-blue-400" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-200">Processing Model</h3>
-                <p className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold">Segmentation Architecture</p>
+        {/* Global Model Selection & Advanced Settings */}
+        <div className="relative z-50 flex justify-center mb-10 fade-in-up">
+          <div className="inline-flex items-center p-1.5 bg-slate-900/60 backdrop-blur-xl border border-slate-700/50 rounded-2xl shadow-2xl shadow-blue-900/10">
+            
+            {/* Model Selector Section */}
+            <div className="flex items-center pl-4 pr-2 border-r border-slate-700/60 relative group">
+              <Zap className="w-4 h-4 text-blue-400 mr-2.5 shrink-0" />
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="bg-transparent text-slate-200 text-sm font-bold outline-none cursor-pointer py-2 pr-6 appearance-none hover:text-white transition-colors"
+              >
+                <option value="attention_unet" className="bg-slate-900">Attention U-Net (Default)</option>
+                <option value="resnet_unet" className="bg-slate-900">ResNet U-Net (Fast)</option>
+                <option value="trans_unet" className="bg-slate-900">Trans-UNet (Advanced)</option>
+              </select>
+              {/* Custom tiny chevron for the select */}
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                <span className="text-[10px] text-slate-500 transition-colors group-hover:text-slate-300">▼</span>
               </div>
             </div>
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              className="w-full sm:w-auto bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500/40 transition-all cursor-pointer hover:border-slate-600"
-            >
-              <option value="attention_unet">Attention U-Net (Default)</option>
-              <option value="resnet_unet">ResNet U-Net (Fast)</option>
-              <option value="trans_unet">Trans-UNet (Advanced)</option>
-            </select>
+
+            {/* Advanced Settings Trigger Section */}
+            <div className="pl-2 pr-1">
+              <AdvancedSettings settings={settings} setSettings={setSettings} />
+            </div>
+
           </div>
         </div>
 

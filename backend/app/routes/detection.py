@@ -232,7 +232,7 @@ def create_hybrid_rgb_map(forest_mask: np.ndarray, snow_mask: np.ndarray) -> np.
     
     return rgb
 
-def process_upload(upload_file: UploadFile, inference: InferenceService) -> tuple[np.ndarray, np.ndarray]:
+def process_upload(upload_file: UploadFile, inference: InferenceService, **inference_kwargs) -> tuple[np.ndarray, np.ndarray]:
     """
     Handles memory-safe sliding window inference for an uploaded file.
     Returns: (predicted_mask, original_array)
@@ -250,7 +250,7 @@ def process_upload(upload_file: UploadFile, inference: InferenceService) -> tupl
             tile_stream = stream_tiles_from_disk(tmp_path, tile_size=512)
             predicted_tiles = []
             for spec, tile in tile_stream:
-                predicted_tiles.append((spec, inference.predict(tile)))
+                predicted_tiles.append((spec, inference.predict(tile, **inference_kwargs)))
 
             # Read the full array into RAM once for visualization/NDWI (uint16 ~900MB max)
             with rasterio.open(tmp_path) as src:
@@ -272,7 +272,7 @@ def process_upload(upload_file: UploadFile, inference: InferenceService) -> tupl
         tiles_gen = split_array_into_tiles(arr, tile_size=512)
         predicted_tiles = []
         for spec, tile in tiles_gen:
-            predicted_tiles.append((spec, inference.predict(tile)))
+            predicted_tiles.append((spec, inference.predict(tile, **inference_kwargs)))
 
         h, w = arr.shape[:2]
         mask = stitch_mask_tiles(predicted_tiles, (h, w))
@@ -286,19 +286,35 @@ async def detect_change(
     image_t1: UploadFile = File(...),
     image_t2: UploadFile = File(...),
     model_name: str = Form("attention_unet"),
+    contrast_stretch: bool = Form(True),
+    percentile_2_98: bool = Form(True),
+    esa_offset_fix: bool = Form(False),
+    enable_ndvi_veto: bool = Form(True),
+    ndvi_threshold: float = Form(0.25),
+    band_order: str = Form("RGBN")
 ):
     task_id = uuid.uuid4().hex[:12]
 
     validate_image_dimensions_safe(image_t1, image_t2, task_id)
 
+    # Bundle inference options
+    inf_kwargs = {
+        "contrast_stretch": contrast_stretch,
+        "percentile_2_98": percentile_2_98,
+        "esa_offset_fix": esa_offset_fix,
+        "enable_ndvi_veto": enable_ndvi_veto,
+        "ndvi_threshold": ndvi_threshold,
+        "band_order": band_order
+    }
+
     try:
         inference = InferenceService(model_name=model_name)
         
         logger.info(f"Processing T1 with {model_name}...")
-        mask_t1, arr_t1 = process_upload(image_t1, inference)
+        mask_t1, arr_t1 = process_upload(image_t1, inference, **inf_kwargs)
         
         logger.info(f"Processing T2 with {model_name}...")
-        mask_t2, arr_t2 = process_upload(image_t2, inference)
+        mask_t2, arr_t2 = process_upload(image_t2, inference, **inf_kwargs)
         
     except Exception as exc:
         logger.exception("Inference failed")
@@ -348,6 +364,15 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
 
     task_id = uuid.uuid4().hex[:12]
 
+    inf_kwargs = {
+        "contrast_stretch": getattr(query, 'contrast_stretch', True),
+        "percentile_2_98": getattr(query, 'percentile_2_98', True),
+        "esa_offset_fix": getattr(query, 'esa_offset_fix', False),
+        "enable_ndvi_veto": getattr(query, 'enable_ndvi_veto', True),
+        "ndvi_threshold": getattr(query, 'ndvi_threshold', 0.25),
+        "band_order": getattr(query, 'band_order', 'RGBN')
+    }
+
     try:
         # Fetch T1 and T2 numpy arrays from AWS Open Data
         # Ensure we use the SAME MGRS tile for both to avoid geographic displacement
@@ -390,11 +415,11 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
         
         # Predict masks using the memory generator
         tiles_t1 = split_array_into_tiles(arr_t1, tile_size=512)
-        pred_t1 = [(spec, inference.predict(tile)) for spec, tile in tiles_t1]
+        pred_t1 = [(spec, inference.predict(tile, **inf_kwargs)) for spec, tile in tiles_t1]
         mask_t1 = stitch_mask_tiles(pred_t1, (h_t1, w_t1))
 
         tiles_t2 = split_array_into_tiles(arr_t2, tile_size=512)
-        pred_t2 = [(spec, inference.predict(tile)) for spec, tile in tiles_t2]
+        pred_t2 = [(spec, inference.predict(tile, **inf_kwargs)) for spec, tile in tiles_t2]
         mask_t2 = stitch_mask_tiles(pred_t2, (h_t2, w_t2))
 
         # Change Detection
@@ -434,7 +459,17 @@ async def detect_change_automated(query: STACQueryRequest) -> ChangeDetectionRes
     response_model=ChangeDetectionResponse,
     summary="Hybrid Forest and Snow/Water Detection"
 )
-async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadFile = File(...), model_name: str = Form("attention_unet")):
+async def detect_forest_snow(
+    image_t1: UploadFile = File(...),
+    image_t2: UploadFile = File(...),
+    model_name: str = Form("attention_unet"),
+    contrast_stretch: bool = Form(True),
+    percentile_2_98: bool = Form(True),
+    esa_offset_fix: bool = Form(False),
+    enable_ndvi_veto: bool = Form(True),
+    ndvi_threshold: float = Form(0.25),
+    band_order: str = Form("RGBN")
+):
     """
     Detects forest using ML and snow/water using NDWI physics.
     Plots explicit hybrid masks and enforces strict persistent-snow overlap on the change map.
@@ -443,15 +478,24 @@ async def detect_forest_snow(image_t1: UploadFile = File(...), image_t2: UploadF
 
     validate_image_dimensions_safe(image_t1, image_t2, task_id)
 
+    inf_kwargs = {
+        "contrast_stretch": contrast_stretch,
+        "percentile_2_98": percentile_2_98,
+        "esa_offset_fix": esa_offset_fix,
+        "enable_ndvi_veto": enable_ndvi_veto,
+        "ndvi_threshold": ndvi_threshold,
+        "band_order": band_order
+    }
+
     # Read & Load Data
     try:
         inference = InferenceService(model_name=model_name)
         
         logger.info(f"Processing T1 with {model_name}...")
-        mask_forest_t1, arr_t1 = process_upload(image_t1, inference)
+        mask_forest_t1, arr_t1 = process_upload(image_t1, inference, **inf_kwargs)
         
         logger.info(f"Processing T2 with {model_name}...")
-        mask_forest_t2, arr_t2 = process_upload(image_t2, inference)
+        mask_forest_t2, arr_t2 = process_upload(image_t2, inference, **inf_kwargs)
     except Exception as exc:
         logger.exception("Inference failed")
         raise HTTPException(
