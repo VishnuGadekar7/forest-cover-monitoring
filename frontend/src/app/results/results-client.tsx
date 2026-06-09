@@ -19,7 +19,7 @@ export default function ResultsClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const targetId = searchParams.get("id"); // Get ID from URL e.g. /results?id=abc123xyz
-  
+
   const [result, setResult] = useState<ChangeDetectionResult | null>(null);
 
   // Download Menu State
@@ -30,7 +30,7 @@ export default function ResultsClient() {
     // Read the array from local storage
     const savedHistory = localStorage.getItem("prediction_history");
     const history = savedHistory ? JSON.parse(savedHistory) : [];
-    
+
     if (history.length > 0) {
       if (targetId) {
         // Find the specific result the user clicked on
@@ -50,7 +50,7 @@ export default function ResultsClient() {
       // Standard frontend PNG download
       const link = document.createElement("a");
       link.href = assetUrl(result.change_map_url);
-	    link.target = '_blank';
+      link.target = '_blank';
       link.download = `change_map_${result.id}.png`;
       document.body.appendChild(link);
       link.click();
@@ -59,16 +59,16 @@ export default function ResultsClient() {
       // TIF Download: Hit the backend API to generate the GeoTIFF
       try {
         const blob = await exportChangeMapTif(result.id);
-        
+
         // Create a temporary object URL to trigger the browser download
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = url;
         link.download = `change_map_${result.id}.tif`;
-        
+
         document.body.appendChild(link);
         link.click();
-        
+
         // Cleanup the DOM and memory
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
@@ -76,7 +76,7 @@ export default function ResultsClient() {
         console.error("Failed to export TIF:", error);
         alert("Failed to generate TIF export. Check backend logs.");
       }
-    }     
+    }
     setIsDownloadOpen(false);
   };
 
@@ -109,13 +109,13 @@ export default function ResultsClient() {
       {isDownloadOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
           <div className="glass-card w-full max-w-md p-6 relative animate-in fade-in zoom-in-95 duration-200">
-            <button 
+            <button
               onClick={() => setIsDownloadOpen(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
-            
+
             <h3 className="text-xl font-bold text-white mb-1">Export Results</h3>
             <p className="text-sm text-slate-400 mb-6">Configure your output map parameters.</p>
 
@@ -126,21 +126,19 @@ export default function ResultsClient() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => setDownloadFormat("png")}
-                    className={`py-2 px-4 rounded-lg border text-sm font-medium transition-all ${
-                      downloadFormat === "png" 
-                      ? "bg-blue-600/20 border-blue-500 text-blue-400" 
-                      : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800"
-                    }`}
+                    className={`py-2 px-4 rounded-lg border text-sm font-medium transition-all ${downloadFormat === "png"
+                        ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                        : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800"
+                      }`}
                   >
                     PNG (Standard)
                   </button>
                   <button
                     onClick={() => setDownloadFormat("tif")}
-                    className={`py-2 px-4 rounded-lg border text-sm font-medium transition-all ${
-                      downloadFormat === "tif" 
-                      ? "bg-blue-600/20 border-blue-500 text-blue-400" 
-                      : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800"
-                    }`}
+                    className={`py-2 px-4 rounded-lg border text-sm font-medium transition-all ${downloadFormat === "tif"
+                        ? "bg-blue-600/20 border-blue-500 text-blue-400"
+                        : "bg-slate-800/50 border-slate-700 text-slate-400 hover:bg-slate-800"
+                      }`}
                   >
                     TIF (Geospatial)
                   </button>
@@ -180,15 +178,17 @@ export default function ResultsClient() {
       )}
 
       <main className="pt-24 pb-16 px-4 max-w-6xl mx-auto">
+        {/* Back Button */}
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 mb-8 px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-all font-semibold text-sm"
+        >
+          ← Back
+        </button>
+
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10 fade-in-up">
           <div>
-            <button
-              onClick={() => router.push("/upload")}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors mb-3"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back to Upload
-            </button>
             <h1 className="text-3xl font-bold gradient-text">Change Detection Report</h1>
             <p className="text-slate-500 text-sm mt-1">
               Deep learning segmentation · Temporal pixel-wise comparison
@@ -201,7 +201,7 @@ export default function ResultsClient() {
             </span>
             <span className="text-slate-500 text-sm">net change</span>
             {/* Download Button */}
-            <button 
+            <button
               onClick={() => setIsDownloadOpen(true)}
               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sm text-slate-200 transition-colors ml-4"
             >

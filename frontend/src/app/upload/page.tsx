@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from "framer-motion";
 function storeResult(result: ChangeDetectionResult): string {
   // Get existing history, or an empty array if it doesn't exist
   const existingHistory = JSON.parse(localStorage.getItem("prediction_history") || "[]");
-  
+
   // Ensure the result has a timestamp
   const resultToSave = {
     ...result,
@@ -31,7 +31,7 @@ function storeResult(result: ChangeDetectionResult): string {
   localStorage.setItem("prediction_history", JSON.stringify(cappedHistory));
 
   // Return the ID so the router knows where to navigate
-  return resultToSave.id; 
+  return resultToSave.id;
 }
 
 export default function UploadPage() {
@@ -120,6 +120,14 @@ export default function UploadPage() {
       <Navbar />
 
       <main className="pt-24 pb-16 px-4 max-w-5xl mx-auto">
+        {/* Back Button */}
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 mb-8 px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-slate-200 transition-all font-semibold text-sm"
+        >
+          ← Back
+        </button>
+
         {/* Hero */}
         <div className="text-center mb-12 fade-in-up">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-green-500/10 border border-green-500/20 text-green-400 text-xs font-medium mb-6">

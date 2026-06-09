@@ -1,10 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  // Disable Turbopack due to Windows compatibility issues
-  experimental: {
-    turbo: false,
-  },
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Allow image optimization for backend static assets
   images: {
     remotePatterns: [
@@ -18,4 +13,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+module.exports = nextConfig;

@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from app.services.news_pipeline import (
     generate_real_time_incidents
@@ -50,7 +50,7 @@ CACHE_DURATION = 60 * 60 * 6
 # =====================================================
 
 @router.get("/news")
-async def get_news():
+async def get_news(limit: int = Query(10, ge=1, le=50), offset: int = Query(0, ge=0)):
 
     print("Checking live forest news cache...")
 
@@ -84,7 +84,17 @@ async def get_news():
 
         data = json.load(f)
 
-    return data[:10]
+    # Return paginated results
+    total = len(data)
+    results = data[offset:offset+limit]
+    
+    return {
+        "data": results,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": (offset + limit) < total
+    }
 
 # =====================================================
 # HISTORIC NEWS ROUTE

@@ -4,11 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import numpy as np
+import time
 
 from app.routes.detection import router as detection_router
 from app.routes.export import router as export_router
 from app.routes.news import router as news_router
 from app.services.inference_service import InferenceService
+from app.services.news_pipeline import generate_real_time_incidents
 from app.routes.historic import router as historic_router
 
 @asynccontextmanager
@@ -29,6 +31,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"CRITICAL: Model warm-up failed! {e}")
         raise e
+
+    # =========================================================
+    # PRE-COMPUTE NEWS ON STARTUP
+    # =========================================================
+    print("Forest Monitor -- pre-computing live news...")
+    try:
+        start_time = time.time()
+        generate_real_time_incidents()
+        elapsed = time.time() - start_time
+        print(f"News pre-computation completed in {elapsed:.2f}s")
+    except Exception as e:
+        print(f"Warning: News pre-computation failed: {e}")
 
     yield
 

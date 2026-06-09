@@ -35,7 +35,8 @@ GNEWS_KEY = os.getenv("GNEWS_KEY")
 # =========================================================
 
 DAYS_BACK = 90
-MAX_INCIDENTS = 300
+MAX_INCIDENTS = 50  # Reduced from 300 for performance
+MAX_VALID_INCIDENTS = 10  # Early exit after 10 valid incidents
 
 cutoff_date = datetime.utcnow() - timedelta(days=DAYS_BACK)
 
@@ -60,6 +61,16 @@ os.makedirs(NEWS_JSON_DIR, exist_ok=True)
 OUTPUT_JSON = os.path.join(
     NEWS_JSON_DIR,
     "incidents.json"
+)
+
+GEOCODE_CACHE_JSON = os.path.join(
+    NEWS_JSON_DIR,
+    "geocode_cache.json"
+)
+
+GEOCODE_CACHE_JSON = os.path.join(
+    NEWS_JSON_DIR,
+    "geocode_cache.json"
 )
 
 # =========================================================
@@ -444,7 +455,29 @@ geocoder = Nominatim(
     user_agent="forest-monitor"
 )
 
-geo_cache = {}
+# =========================================================
+# PERSISTENT GEOCODING CACHE
+# =========================================================
+
+def load_geocode_cache():
+    """Load geocoding cache from JSON file"""
+    if os.path.exists(GEOCODE_CACHE_JSON):
+        try:
+            with open(GEOCODE_CACHE_JSON, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_geocode_cache(cache):
+    """Save geocoding cache to JSON file"""
+    try:
+        with open(GEOCODE_CACHE_JSON, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save geocode cache: {e}")
+
+geo_cache = load_geocode_cache()
 
 def geocode_place(place_name):
 
@@ -463,11 +496,12 @@ def geocode_place(place_name):
 
         try:
 
-            time.sleep(0.5)
+            # Reduced from 0.5s to 0.1s to respect rate limits minimally
+            time.sleep(0.1)
 
             result = geocoder.geocode(
                 query,
-                timeout=10
+                timeout=5  # Reduced timeout
             )
 
             if result:
@@ -494,6 +528,7 @@ def geocode_place(place_name):
                 }
 
                 geo_cache[place_name] = out
+                save_geocode_cache(geo_cache)  # Persist cache
 
                 return out
 
@@ -504,6 +539,7 @@ def geocode_place(place_name):
             continue
 
     geo_cache[place_name] = None
+    save_geocode_cache(geo_cache)  # Persist failed lookups too
 
     return None
 
@@ -568,12 +604,17 @@ def generate_real_time_incidents():
     print(f"After dedupe: {len(deduped)}")
 
     # =====================================================
-    # NLP + GEOCODING
+    # NLP + GEOCODING (with early exit)
     # =====================================================
 
     final_incidents = []
 
     for i, row in enumerate(deduped[:MAX_INCIDENTS]):
+
+        # Early exit: stop after MAX_VALID_INCIDENTS
+        if len(final_incidents) >= MAX_VALID_INCIDENTS:
+            print(f"Reached {MAX_VALID_INCIDENTS} valid incidents, stopping processing")
+            break
 
         try:
 
@@ -602,7 +643,7 @@ def generate_real_time_incidents():
 
             incident = {
 
-                "id": i + 1,
+                "id": len(final_incidents) + 1,
 
                 "title":
                     row["title"],

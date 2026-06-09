@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function NewsPage() {
+  const router = useRouter();
 
   const [activeTab, setActiveTab] = useState("live");
 
@@ -10,67 +12,68 @@ export default function NewsPage() {
   const [historicNews, setHistoricNews] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   // =====================================================
-// FETCH LIVE NEWS
-// =====================================================
+  // FETCH LIVE NEWS
+  // =====================================================
 
-const CACHE_DURATION = 1000 * 60 * 60 * 6;
-// 6 hours
+  const CACHE_DURATION = 1000 * 60 * 60 * 6;
+  // 6 hours
 
-useEffect(() => {
+  useEffect(() => {
 
-  const cached = localStorage.getItem("liveNews");
+    const cached = localStorage.getItem("liveNews");
 
-  if (cached) {
+    if (cached) {
 
-    const parsed = JSON.parse(cached);
+      const parsed = JSON.parse(cached);
 
-    const now = Date.now();
+      const now = Date.now();
 
-    // USE CACHE IF NOT EXPIRED
-    if (
-      now - parsed.timestamp
-      < CACHE_DURATION
-    ) {
+      // USE CACHE IF NOT EXPIRED
+      if (
+        now - parsed.timestamp
+        < CACHE_DURATION
+      ) {
 
-      console.log("Using cached live news");
+        console.log("Using cached live news");
 
-      setLiveNews(parsed.data);
+        setLiveNews(parsed.data);
 
-      return;
+        return;
+      }
     }
-  }
 
-  console.log("Fetching fresh live news");
+    console.log("Fetching fresh live news");
 
-  setLoading(true);
+    setLoading(true);
 
-  fetch("http://127.0.0.1:8000/news")
+    fetch("http://127.0.0.1:8000/news")
 
-    .then((res) => res.json())
+      .then((res) => res.json())
 
-    .then((data) => {
+      .then((response) => {
+        // Handle new pagination response format
+        const newsData = response.data || response;
+        setLiveNews(newsData);
 
-      setLiveNews(data);
+        localStorage.setItem(
 
-      localStorage.setItem(
+          "liveNews",
 
-        "liveNews",
+          JSON.stringify({
 
-        JSON.stringify({
+            data: newsData,
 
-          data: data,
+            timestamp: Date.now()
 
-          timestamp: Date.now()
+          })
+        );
+      })
 
-        })
-      );
-    })
+      .catch(console.error)
 
-    .catch(console.error)
+      .finally(() => setLoading(false));
 
-    .finally(() => setLoading(false));
-
-}, []);
+  }, []);
 
   // =====================================================
   // FETCH HISTORIC NEWS
@@ -119,6 +122,17 @@ useEffect(() => {
     <div className="min-h-screen bg-[#020817] text-white p-8">
 
       {/* ================================================= */}
+      {/* BACK BUTTON */}
+      {/* ================================================= */}
+
+      <button
+        onClick={() => router.back()}
+        className="flex items-center gap-2 mb-8 px-4 py-2 rounded-lg bg-[#081225] border border-cyan-500 text-cyan-500 hover:bg-cyan-500 hover:text-black transition-all font-semibold"
+      >
+        ← Back
+      </button>
+
+      {/* ================================================= */}
       {/* TITLE */}
       {/* ================================================= */}
 
@@ -142,10 +156,10 @@ useEffect(() => {
 
           ${activeTab === "live"
 
-            ? "bg-cyan-500 text-black"
+              ? "bg-cyan-500 text-black"
 
-            : "bg-[#081225] border border-cyan-500 text-white"
-          }`}
+              : "bg-[#081225] border border-cyan-500 text-white"
+            }`}
         >
 
           Live News
@@ -160,10 +174,10 @@ useEffect(() => {
 
           ${activeTab === "historic"
 
-            ? "bg-cyan-500 text-black"
+              ? "bg-cyan-500 text-black"
 
-            : "bg-[#081225] border border-cyan-500 text-white"
-          }`}
+              : "bg-[#081225] border border-cyan-500 text-white"
+            }`}
         >
 
           Historic Analysis
@@ -292,9 +306,9 @@ useEffect(() => {
                     alt="Before"
 
                     onError={(e) => {
-                        console.log("Before image failed");
+                      console.log("Before image failed");
                     }}
-                />
+                  />
 
                 </div>
 
@@ -324,9 +338,9 @@ useEffect(() => {
                     alt="After"
 
                     onError={(e) => {
-                        console.log("After image failed");
+                      console.log("After image failed");
                     }}
-                />
+                  />
 
                 </div>
 
@@ -340,16 +354,16 @@ useEffect(() => {
             {activeTab === "historic" &&
               item.forest_loss_percent && (
 
-              <p className="text-red-400 font-bold mb-4">
+                <p className="text-red-400 font-bold mb-4">
 
-                Forest Loss:
+                  Forest Loss:
 
-                {" "}
+                  {" "}
 
-                {item.forest_loss_percent}%
+                  {item.forest_loss_percent}%
 
-              </p>
-            )}
+                </p>
+              )}
 
             {/* =========================================== */}
             {/* SUMMARY */}
