@@ -40,3 +40,5 @@ spacy
 geopy
 sentinelhub
 requests
+trafilatura
+beautifulsoup4
